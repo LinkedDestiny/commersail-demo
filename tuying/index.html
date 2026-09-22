@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#20352e">
+  <title>图映 · 商品资产</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='12' fill='%2320352e'/%3E%3Cpath d='M13 15h22v18H13zM18 28l5-5 5 5 4-4M19 20h.1' fill='none' stroke='%23e7eee7' stroke-width='2' stroke-linejoin='round' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+  <script src="data.js" defer></script>
+  <script src="core.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到内容</a>
+  <aside class="sidebar" aria-label="主侧栏">
+    <a class="brand" href="#library" aria-label="图映 商品资产">
+      <span class="brand-mark"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M8 6h16a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Z"/><path d="m6 21 7-7 6 6 3-3 4 4M21 11h.01"/></svg></span>
+      <span>图映</span><span class="brand-period">.</span>
+    </a>
+    <nav class="primary-nav" aria-label="工作区">
+      <button class="nav-item active" data-nav="library" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.6"/><rect x="14" y="3" width="7" height="7" rx="1.6"/><rect x="3" y="14" width="7" height="7" rx="1.6"/><rect x="14" y="14" width="7" height="7" rx="1.6"/></svg><span>商品资产</span><span class="nav-count" id="libraryCount">10</span></button>
+      <button class="nav-item" data-nav="studio" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3ZM20 15l.8 2.2L23 18l-2.2.8L20 21l-.8-2.2L17 18l2.2-.8L20 15ZM4 2v4M2 4h4"/></svg><span>AI 创作</span></button>
+      <button class="nav-item" data-nav="review" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 8 3v6c0 4.5-8 9-8 9s-8-4.5-8-9V6l8-3Z"/><path d="m8.5 11.5 2.5 2.5 4.5-5"/></svg><span>合规检测</span></button>
+      <button class="nav-item" data-nav="export" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h15m-4-4 4 4-4 4M20 17H5m4-4-4 4 4 4"/></svg><span>格式转换</span></button>
+      <button class="nav-item" data-nav="tasks" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="17" rx="2"/><path d="M9 4V2m6 2V2M8 10h8M8 14h8M8 18h4"/></svg><span>任务中心</span><span class="nav-task-dot" id="taskDot" hidden></span></button>
+    </nav>
+    <div class="sidebar-section-title">我的分组</div>
+    <nav class="group-nav" aria-label="商品分组">
+      <button class="sidebar-group active" data-group="all" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/></svg><span>全部商品</span><span id="groupCountAll">10</span></button>
+      <button class="sidebar-group" data-group="秋日童装" type="button"><span class="group-dot dot-olive"></span><span>秋日童装</span><span id="groupCountAutumn">5</span></button>
+      <button class="sidebar-group" data-group="夏日轻装" type="button"><span class="group-dot dot-sand"></span><span>夏日轻装</span><span id="groupCountSummer">5</span></button>
+    </nav>
+    <div class="sidebar-bottom">
+      <button class="workspace-switch" data-action="reset" type="button" aria-label="重置演示"><span class="workspace-avatar">图</span><span class="workspace-name">我的工作区<span class="demo-badge">DEMO</span></span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M20 12a8 8 0 1 0-2.2 5.5"/></svg></button>
+    </div>
+  </aside>
+  <button class="sidebar-scrim" data-action="toggle-menu" type="button" aria-label="收起菜单" tabindex="-1"></button>
+  <div class="workspace">
+    <header class="topbar">
+      <div class="topbar-leading"><button class="icon-button mobile-menu" id="menuMobile" data-action="toggle-menu" aria-label="展开菜单" aria-expanded="false" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button><div class="breadcrumb"><span>工作区</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg><span id="breadcrumb">商品资产</span></div></div>
+      <div class="topbar-trailing"><label class="global-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></svg><input id="globalSearch" type="search" placeholder="搜索商品" aria-label="搜索商品" autocomplete="off"><kbd>⌘ K</kbd></label><span class="local-status"><i></i>本地工作区</span><span class="profile-avatar" aria-label="当前工作区">Y</span></div>
+    </header>
+    <main id="main" tabindex="-1"></main>
+  </div>
+  <dialog id="dialog" aria-label="商品编辑"></dialog>
+  <dialog id="lightbox" class="lightbox" aria-label="图片预览"></dialog>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <div id="hoverPreview" class="hover-preview" popover="manual" aria-hidden="true"></div>
+</body>
+</html>
