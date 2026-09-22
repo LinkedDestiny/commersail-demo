@@ -68,49 +68,88 @@
 
   function csvCell(value, numeric = false) {
     let text = String(value ?? '');
-    if (!numeric && /^[=+\-@\t\r]/.test(text)) text = `'${text}`;
+    if (!numeric && /^(?:[\t\r\n]|\s*[=+\-@])/.test(text)) text = `'${text}`;
     return `"${text.replace(/"/g, '""')}"`;
   }
 
-  function buildExport(products, format = 'json', platform = '通用') {
+  function buildExport(products, format = 'json', platform = '通用', options = {}) {
     if (format === 'csv') {
-      const rows = [['商品ID', '标题', '来源平台', '目标平台', '规格', '价格', '库存', '主图'].map(value => csvCell(value)).join(',')];
+      const rows = [['商品ID', '标题', '来源平台', '目标平台', '规格', '价格', '库存', '主图', '数据包', '目标工具'].map(value => csvCell(value)).join(',')];
       for (const product of products) for (const sku of product.skus || []) {
-        rows.push([product.id, product.title, product.platform || product.sourcePlatform || '', platform, specs(sku), sku.price, sku.stock, mainImages(product)[0] || '']
+        rows.push([product.sourceId ?? product.id, product.title, product.platform || product.sourcePlatform || '', platform, specs(sku), sku.price, sku.stock, mainImages(product)[0] || '', product.packageName || product.packageId || '', options.tool || '通用']
           .map((value, index) => csvCell(value, [5, 6].includes(index) && Number.isFinite(money(value)))).join(','));
       }
       return { content: '\ufeff' + rows.join('\r\n') + '\r\n', mime: 'text/csv;charset=utf-8', filename: '图映-商品清单.csv' };
     }
     if (format !== 'json') throw new Error('不支持的导出格式');
     return {
-      content: JSON.stringify({ demo: true, format: 'tuying-demo-manifest', version: 1, platform, products }, null, 2),
+      content: JSON.stringify({ demo: true, format: 'tuying-demo-manifest', version: 1, platform, targetPlatform: platform, targetTool: options.tool || '通用', totalProducts: products.length, products }, null, 2),
       mime: 'application/json;charset=utf-8', filename: '图映-商品清单.json'
     };
   }
 
   // ponytail: Stored ZIP supports demo-sized image packs; stream compression when real large batches are introduced.
-  async function buildImageZip(products, fetcher = root.fetch.bind(root)) {
+  async function buildImageZip(products, fetcher = root.fetch.bind(root), options = {}) {
     const encoder = new TextEncoder(), files = [], chunks = [], directory = [];
+    const roleNames = { main: '主图', portraitMain: '3比4主图', skuImages: 'SKU图', details: '详情图', whiteImages: '白底图', qualifications: '商品资质', video: '视频' };
+    const roles = options.mediaTypes ?? Object.keys(roleNames);
+    if (!Array.isArray(roles) || roles.some(role => !Object.hasOwn(roleNames, role))) throw new Error('未知媒体类型');
+    const selectedRoles = [...new Set(roles)], folders = options.folders ?? 0, distribution = options.distribution || 'balanced';
+    if (!Number.isSafeInteger(folders) || folders < 0) throw new Error('分包数量须为非负整数');
+    if (!['balanced', 'random'].includes(distribution)) throw new Error('未知分包方式');
+    const manifest = { demo: true, format: 'tuying-demo-image-pack', version: 1, resourceRoles: selectedRoles,
+      targetPlatform: options.platform || '通用', targetTool: options.tool || '通用', totalProducts: products.length,
+      folders: Math.min(folders, products.length), distribution, missingMedia: [], products: [] };
+    const entries = products.map((product, index) => ({ product, index }));
+    if (folders && distribution === 'random') for (let i = entries.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [entries[i], entries[j]] = [entries[j], entries[i]];
+    }
     const crcTable = Array.from({ length: 256 }, (_, i) => {
       for (let bit = 0; bit < 8; bit++) i = (i >>> 1) ^ (i & 1 ? 0xedb88320 : 0);
       return i >>> 0;
     });
     const safeName = value => String(value).replace(/[^a-zA-Z0-9_\-\u4e00-\u9fff]/g, '_').slice(0, 100) || 'product';
-    for (const [productIndex, product] of products.entries()) {
-      const folder = `${String(productIndex + 1).padStart(2, '0')}_${safeName(product.id)}`;
-      files.push({ name: `${folder}/product.json`, bytes: encoder.encode(JSON.stringify({ ...product, demo: true }, null, 2)) });
-      for (const [index, src] of mainImages(product).entries()) {
-        const value = String(src);
-        const isData = /^data:image\/(?:png|jpeg|webp|gif);base64,/i.test(value);
-        const isLocal = /^(?:\.\/)?assets\/[a-zA-Z0-9_\-./]+$/.test(value) && !value.includes('..');
-        if (!isData && !isLocal) throw new Error('图包仅支持本地 assets 图片');
-        const response = await fetcher(value);
-        if (!response.ok) throw new Error(`图片读取失败：${index + 1}`);
-        const bytes = new Uint8Array(await response.arrayBuffer());
-        const extension = isData ? value.match(/^data:image\/([^;]+)/i)[1].replace('jpeg', 'jpg') : value.split('.').pop().toLowerCase();
-        files.push({ name: `${folder}/主图_${index + 1}.${extension}`, bytes });
+    for (const [position, { product, index: productIndex }] of entries.entries()) {
+      const batch = folders ? `批次_${String(Math.floor(position * manifest.folders / products.length) + 1).padStart(2, '0')}/` : '';
+      const folder = `${batch}${String(productIndex + 1).padStart(2, '0')}_${safeName(product.id)}`;
+      const exported = { ...product, sourceId: product.sourceId ?? product.id, demo: true }, mapped = new Map();
+      const missing = (role, source, reason) => manifest.missingMedia.push({ productId: product.id, sourceId: exported.sourceId, packageId: product.packageId || '', role, source: String(source).slice(0, 160), reason });
+      for (const role of Object.keys(roleNames)) {
+        exported[role] = role === 'video' ? '' : [];
+        if (!selectedRoles.includes(role)) continue;
+        let sources = role === 'main' ? mainImages(product) : role === 'video' ? [product.video].filter(Boolean) : product[role] || [];
+        if (role === 'skuImages') sources = [...new Set([...sources, ...(product.skus || []).map(sku => sku.image).filter(Boolean)])];
+        for (const [index, source] of sources.entries()) {
+          const value = typeof source === 'string' ? source : source.src || source.url || '';
+          const isLocal = /^(?:\.\/)?assets\/(?:[a-zA-Z0-9_-]+\/)*[a-zA-Z0-9_.-]+$/.test(value) && !value.includes('..');
+          const data = value.match(/^data:(image\/(png|jpeg|webp|gif)|video\/(mp4|webm));base64,([a-zA-Z0-9+/]*={0,2})$/i);
+          const isSVG = /^data:image\/svg\+xml[;,]/i.test(value) || (isLocal && /\.svg$/i.test(value));
+          if (isSVG) { missing(role, value, '已跳过 SVG 占位图'); continue; }
+          if (!isLocal && !data) throw new Error('图包仅支持本地 assets 媒体或图片、视频数据');
+          const extension = (data ? data[2] || data[3] : value.split('.').pop()).toLowerCase().replace('jpeg', 'jpg');
+          if (!(role === 'video' ? ['mp4', 'webm'] : ['png', 'jpg', 'webp', 'gif']).includes(extension)) throw new Error('媒体格式与用途不匹配');
+          let bytes;
+          try {
+            const response = await fetcher(value);
+            if (!response.ok) throw new Error('读取失败');
+            bytes = new Uint8Array(await response.arrayBuffer());
+            if (!bytes.length) throw new Error('文件为空');
+          } catch { missing(role, value, '本地媒体读取失败'); continue; }
+          const relative = `${roleNames[role]}/${index + 1}.${extension}`;
+          files.push({ name: `${folder}/${relative}`, bytes });
+          if (role === 'video') exported.video = relative; else exported[role].push(relative);
+          if (!mapped.has(value) || role === 'skuImages') mapped.set(value, relative);
+        }
       }
+      if (Object.hasOwn(product, 'mainImages')) exported.mainImages = exported.main;
+      if (Object.hasOwn(product, 'images')) exported.images = exported.main;
+      exported.skus = (product.skus || []).map(sku => ({ ...sku, image: mapped.get(sku.image) || '' }));
+      exported.totalImages = Object.keys(roleNames).filter(role => role !== 'video').reduce((sum, role) => sum + exported[role].length, 0);
+      files.push({ name: `${folder}/product.json`, bytes: encoder.encode(JSON.stringify(exported, null, 2)) });
+      manifest.products.push({ id: product.id, sourceId: exported.sourceId, packageId: product.packageId || '', file: `${folder}/product.json` });
     }
+    files.push({ name: 'manifest.json', bytes: encoder.encode(JSON.stringify(manifest, null, 2)) });
     let offset = 0;
     for (const file of files) {
       const name = encoder.encode(file.name), length = file.bytes.length;

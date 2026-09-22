@@ -10,19 +10,26 @@
     check:'<path d="m5 12 4 4L19 6"/>', search:'<circle cx="10.8" cy="10.8" r="7.3"/><path d="m16 16 4.5 4.5"/>',
     refresh:'<path d="M20 7a8.5 8.5 0 1 0 .8 8M20 3v5h-5"/>', sparkle:'<path d="m12 3 2.7 6.3L21 12l-6.3 2.7L12 21l-2.7-6.3L3 12l6.3-2.7ZM20 2v4M18 4h4"/>',
     download:'<path d="M12 3v13m-4-4 4 4 4-4M4 16v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/>', image:'<rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.5"/><path d="m3 17 5-5 4 4 4-6 5 7"/>',
-    folder:'<path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>', undo:'<path d="M4 10h10a6 6 0 0 1 0 12M4 10l5-5M4 10l5 5"/>', zoom:'<circle cx="10.5" cy="10.5" r="7"/><path d="m16 16 5 5M7 10.5h7M10.5 7v7"/>'
+    folder:'<path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>', undo:'<path d="M4 10h10a6 6 0 0 1 0 12M4 10l5-5M4 10l5 5"/>', zoom:'<circle cx="10.5" cy="10.5" r="7"/><path d="m16 16 5 5M7 10.5h7M10.5 7v7"/>', copy:'<rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h3"/>'
   };
   const icon = name => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name] || icons.image}</svg>`;
   const button = (label, action, cls = '', attrs = '', glyph = '') => `<button type="button" class="wb-button ${cls}" data-wb-action="${action}" ${attrs}>${glyph ? icon(glyph) : ''}${label}</button>`;
   const ib = (label, action, glyph, attrs = '') => button('', action, 'wb-icon', `aria-label="${esc(label)}" title="${esc(label)}" ${attrs}`, glyph);
   const tabs = [['main','主图'],['skuImages','SKU 图'],['details','详情图'],['qualifications','商品资质'],['video','视频'],['whiteImages','白底图']];
+  const imageRoles = ['main','portraitMain','skuImages','details','whiteImages','qualifications'];
+  const imagePaths = p => [...new Set(imageRoles.flatMap(role => p?.[role] || []))];
+  const reviewed = p => { const paths = imagePaths(p); return paths.length > 0 && paths.every(path => (Array.isArray(p.reviewedImages)&&p.reviewedImages.includes(path))); };
+  const sourceId = p => String(p.sourceId || p.id);
+  const blacklistKey = p => `${p.platform}:${sourceId(p)}`;
   let current;
 
   function open(options) {
     if (current) { current.focus(); return current; }
-    const products = (options.products || []).map(copy), drafts = new Map(), histories = new Map(), selected = new Set();
-    let activeId = products.find(p => p.id === options.initialId)?.id || products[0]?.id;
-    let tab = tabs.some(t => t[0] === options.initialTab) ? options.initialTab : 'main', query = '', filter = 'all', page = 1, auto = true, inspection = false, selectedMedia = new Set(), status = '', error = '', saveTimer, hoverTimer, blocked = false;
+    const products = (options.products || []).map(p => { const value=copy(p); imageRoles.forEach(role=>{value[role] ||= [];}); return value; }), drafts = new Map(), histories = new Map(), selected = new Set();
+    let blacklistedIds = [...new Set((options.getBlacklist?.() || []).map(String))], includeBlacklisted = false;
+    const isBlacklisted = p => blacklistedIds.includes(blacklistKey(p)) || blacklistedIds.includes(sourceId(p));
+    let activeId = products.find(p => p.id === options.initialId && !isBlacklisted(p))?.id || products.find(p=>!isBlacklisted(p))?.id;
+    let tab = tabs.some(t => t[0] === options.initialTab) ? options.initialTab : 'main', mainRole = 'main', query = '', filter = 'all', page = 1, auto = true, inspection = options.inspection === true, unreviewedOnly = false, sameLinks = false, deleteLinkedSkus = false, selectedMedia = new Set(), status = '', error = '', saveTimer, hoverTimer, blocked = false;
     const pageSize = 10, dialog = document.createElement('dialog'), preview = document.createElement('div');
     dialog.className = 'wb-dialog'; dialog.setAttribute('aria-label', '数据包详情');
     preview.className = 'wb-hover'; preview.setAttribute('popover', 'manual');
@@ -35,15 +42,17 @@
     const draft = () => { if (!drafts.has(activeId) && original()) drafts.set(activeId, copy(original())); return drafts.get(activeId); };
     const dirty = p => p && JSON.stringify(p) !== JSON.stringify(products.find(x => x.id === p.id));
     const lowLimit = p => p.skus.length ? p.skus.reduce((n,s)=>n+Number(s.price),0) / p.skus.length / 2 : 0;
-    const list = () => products.filter(p => (!query || `${p.title} ${p.shortTitle} ${p.id}`.toLowerCase().includes(query.toLowerCase())) && (filter !== 'selected' || selected.has(p.id)) && (filter !== 'low' || p.skus.some(s => s.price < lowLimit(p))) && (filter !== 'empty' || p.skus.some(s => s.stock === 0)));
+    const list = () => products.filter(p => (includeBlacklisted || !isBlacklisted(p)) && (!unreviewedOnly || !reviewed(p)) && (!query || `${p.title} ${p.shortTitle} ${sourceId(p)}`.toLowerCase().includes(query.toLowerCase())) && (filter !== 'selected' || selected.has(p.id)) && (filter !== 'low' || p.skus.some(s => s.price < lowLimit(p))) && (filter !== 'empty' || p.skus.some(s => s.stock === 0)));
     const visible = () => list().slice((page - 1) * pageSize, page * pageSize);
-    const media = () => tab === 'video' ? (draft()?.video ? [draft().video] : []) : (draft()?.[tab] || []);
+    const mediaRole = () => tab === 'main' ? mainRole : tab;
+    const media = () => tab === 'video' ? (draft()?.video ? [draft().video] : []) : (draft()?.[mediaRole()] || []);
     const price = p => `¥${Number(p.price || 0).toFixed(2)}${p.priceMax > p.price ? ' – ' + Number(p.priceMax).toFixed(2) : ''}`;
-    const sync = p => { p.stock = p.skus.reduce((sum, s) => sum + Number(s.stock), 0); if (p.skus.length) { p.price = Math.min(...p.skus.map(s => Number(s.price))); p.priceMax = Math.max(...p.skus.map(s => Number(s.price))); } p.totalImages = tabs.filter(t => t[0] !== 'video').reduce((n, t) => n + (p[t[0]]?.length || 0), 0); };
+    const sync = p => { p.stock = p.skus.reduce((sum, s) => sum + Number(s.stock), 0); if (p.skus.length) { p.price = Math.min(...p.skus.map(s => Number(s.price))); p.priceMax = Math.max(...p.skus.map(s => Number(s.price))); } p.totalImages = imageRoles.reduce((n, role) => n + (p[role]?.length || 0), 0); };
     function validate(p) {
       if (!p.title?.trim()) return '请输入商品标题';
       if (weight(p.title) > 60) return `标题超出 ${weight(p.title) - 60} 字`;
       if (!p.main?.length) return '至少保留 1 张主图';
+      if (!p.skus?.length) return '至少保留 1 个 SKU';
       for (const s of p.skus) {
         if (String(s.price).trim() === '' || !Number.isFinite(Number(s.price)) || Number(s.price) < 0 || Number(s.price) > 100000000) return '请检查 SKU 价格';
         if (String(s.stock).trim() === '' || !Number.isInteger(Number(s.stock)) || Number(s.stock) < 0 || Number(s.stock) > 100000000) return '请检查 SKU 库存';
@@ -59,13 +68,13 @@
       if (!p || (!dirty(p) && !force)) return true;
       const issue = validate(p);
       if (issue) { setStatus('', issue); return false; }
-      const saved = copy(p); saved.skus.forEach(s => { s.price = Number(s.price); s.stock = Number(s.stock); }); sync(saved);
+      const submitted = JSON.stringify(p), saved = copy(p); saved.skus.forEach(s => { s.price = Number(s.price); s.stock = Number(s.stock); }); sync(saved);
       try {
         const accepted = await options.onSave?.(copy(saved));
         if (accepted === false) { setStatus('', '保存失败，请检查商品数据'); return false; }
         const index = products.findIndex(x => x.id === saved.id); if (index >= 0) products[index] = saved;
-        drafts.set(saved.id, copy(saved));
-        if (p.id === activeId) setStatus('已保存');
+        if (JSON.stringify(drafts.get(saved.id)) === submitted) drafts.set(saved.id, copy(saved));
+        if (p.id === activeId) setStatus(dirty(drafts.get(saved.id)) ? '未保存' : '已保存');
         renderList(); return true;
       } catch (err) { setStatus('', err.message || '保存失败'); return false; }
     }
@@ -85,27 +94,38 @@
     }
     async function activate(id) {
       if (id === activeId || !await guard()) return;
-      activeId = id; selectedMedia.clear(); setStatus(dirty(draft()) ? '未保存' : ''); renderList(); renderEditor();
+      activeId = id; const at=list().findIndex(p=>p.id===id);if(at>=0)page=Math.floor(at/pageSize)+1;selectedMedia.clear(); setStatus(dirty(draft()) ? '未保存' : ''); renderList(); renderEditor();
       $('[data-wb-product].wb-active')?.scrollIntoView({block:'nearest'});
     }
     function renderList() {
       const container = $('[data-wb-list]'); if (!container) return;
       const count = list().length; page = Math.min(page, Math.max(1, Math.ceil(count / pageSize)));
-      container.innerHTML = visible().map(p => `<article class="wb-product ${p.id === activeId ? 'wb-active' : ''}" data-wb-product="${esc(p.id)}"><label class="wb-product-check"><input type="checkbox" aria-label="选择 ${esc(p.shortTitle || p.title)}" data-wb-select="${esc(p.id)}" ${selected.has(p.id) ? 'checked' : ''}></label><button type="button" class="wb-product-open" data-wb-action="product" data-id="${esc(p.id)}"><img src="${esc(src(p.main?.[0]))}" alt="${esc(p.shortTitle || p.title)}"><span class="wb-product-copy"><strong>${esc(p.title)}</strong><span class="wb-id">${esc(p.id)}</span><span class="wb-product-meta"><span class="wb-platform">${esc(p.platform)}</span><span>${price(p)}</span></span></span></button></article>`).join('') || '<div class="wb-empty">无匹配商品</div>';
+      container.innerHTML = visible().map(p => `<article class="wb-product ${p.id === activeId ? 'wb-active' : ''}" data-wb-product="${esc(p.id)}"><label class="wb-product-check"><input type="checkbox" aria-label="选择 ${esc(p.shortTitle || p.title)}" data-wb-select="${esc(p.id)}" ${selected.has(p.id) ? 'checked' : ''}></label><button type="button" class="wb-product-open" data-wb-action="product" data-id="${esc(p.id)}"><img src="${esc(src(p.main?.[0]))}" alt="${esc(p.shortTitle || p.title)}"><span class="wb-product-copy"><strong>${esc(p.title)}</strong><span class="wb-id">${esc(sourceId(p))}</span><span class="wb-product-badges">${reviewed(p)?'<span class="wb-reviewed-badge">已鉴图</span>':''}${isBlacklisted(p)?'<span class="wb-blacklisted-badge">黑名单</span>':''}</span><span class="wb-product-meta"><span class="wb-platform">${esc(p.platform)}</span><span>${price(p)}</span></span></span></button></article>`).join('') || '<div class="wb-empty">无匹配商品</div>';
       $('[data-wb-pagination]').innerHTML = `<span>共 ${count} 件</span>${ib('上一页','page-prev','prev', page <= 1 ? 'disabled' : '')}<span>${page}</span>${ib('下一页','page-next','next', page * pageSize >= count ? 'disabled' : '')}`;
       const batch = $('[data-wb-action="delete-selected"]'); if (batch) { batch.disabled = !selected.size; batch.innerHTML = `${icon('trash')}批量删除${selected.size ? ` (${selected.size})` : ''}`; }
+      const selectedEl = $('[data-wb-selection-count]'); if(selectedEl) selectedEl.textContent = selected.size ? `已选 ${selected.size}` : '';
       const countEl = $('[data-wb-count]'); if (countEl) countEl.textContent = `${products.length} 件商品`;
+    }
+    function renderMedia(p) {
+      const a=media(), role=mediaRole(), label=role==='portraitMain'?'3:4 主图':tabs.find(t=>t[0]===tab)[1];
+      const count=key=>key==='video'?(p.video?1:0):key==='main'?p.main.length+p.portraitMain.length:p[key].length;
+      return `<section class="wb-media-section"><div class="wb-tabs" role="tablist" aria-label="媒体类型">${tabs.map(([key,name])=>`<button type="button" role="tab" aria-selected="${tab===key}" class="wb-tab ${tab===key?'wb-active':''}" data-wb-action="tab" data-value="${key}">${name}<span>${count(key)}</span></button>`).join('')}</div>
+        ${tab==='main'?`<div class="wb-main-roles" role="group" aria-label="主图比例">${[['main','1:1 主图'],['portraitMain','3:4 主图']].map(([key,name])=>button(`${name} <span>${p[key].length}</span>`,'main-role',`wb-small ${mainRole===key?'wb-primary':''}`,`data-value="${key}" aria-pressed="${mainRole===key}"`)).join('')}</div>`:''}
+        <div class="wb-media-toolbar"><label class="wb-check"><input type="checkbox" data-wb-all-media ${a.length&&selectedMedia.size===a.length?'checked':''} ${!a.length?'disabled':''}>全选</label>${button('删除所选','delete-media-selected','wb-small',!selectedMedia.size?'disabled':'','trash')}<span class="wb-spacer"></span>${tab==='video'?button('生成视频','ai-video','wb-small','','sparkle'):tab==='whiteImages'?button('生成白底图','ai-white','wb-small','','sparkle'):button('AI 创作','ai','wb-small','','sparkle')}<label class="wb-button wb-small wb-upload">${icon('plus')}上传<input type="file" ${tab==='video'?'accept="video/mp4,video/webm"':'accept="image/jpeg,image/png,image/webp,image/gif" multiple'} data-wb-upload></label></div>
+        ${tab!=='video'?`<div class="wb-media-options"><label class="wb-check"><input type="checkbox" data-wb-same-links ${sameLinks?'checked':''}>当前商品同链接同步删除</label>${tab==='skuImages'?`<label class="wb-check"><input type="checkbox" data-wb-delete-skus ${deleteLinkedSkus?'checked':''}>同步删除关联 SKU</label>`:''}</div>`:''}
+        <div class="wb-media-grid ${tab==='video'?'wb-video-grid':''} ${role==='portraitMain'?'wb-portrait-grid':''}">${a.map((path,i)=>`<article class="wb-media-card" ${tab!=='video'?`draggable="true" data-wb-drag="${i}"`:''}><div class="wb-card-head"><span>${String(i+1).padStart(2,'0')}</span><input type="checkbox" aria-label="选择图片 ${i+1}" data-wb-media="${i}" ${selectedMedia.has(i)?'checked':''}></div>${tab==='video'?`<video controls playsinline preload="metadata" src="${esc(videoSrc(path))}" poster="${esc(src(p.main[0]))}"></video>`:`<button type="button" class="wb-image" data-wb-action="zoom" data-index="${i}" aria-label="放大图片 ${i+1}"><img draggable="false" src="${esc(src(path))}" alt="${esc(p.shortTitle||p.title)} · ${esc(label)} ${i+1}" data-wb-preview="${i}"></button>`}<div class="wb-image-actions">${inspection&&tab!=='video'?button(p.reviewedImages?.includes(path)?'已鉴图':'标记已鉴图','review-image','wb-small wb-reviewed',`data-index="${i}"`,p.reviewedImages?.includes(path)?'check':''):''}${tab!=='video'?`${ib('前移图片 '+(i+1),'media-prev','prev',`data-index="${i}" ${i===0?'disabled':''}`)}${ib('后移图片 '+(i+1),'media-next','next',`data-index="${i}" ${i===a.length-1?'disabled':''}`)}`:''}<span class="wb-spacer"></span>${ib('删除图片 '+(i+1),'delete-media','trash',`data-index="${i}" ${role==='main'&&a.length===1?'disabled':''}`)}</div></article>`).join('')}${!a.length?`<div class="wb-empty wb-empty-media">${icon(tab==='video'?'folder':'image')}<span>暂无${esc(label)}</span></div>`:''}</div></section>`;
     }
     function renderEditor() {
       hideHover();
-      const p = draft(), area = $('[data-wb-editor]');
-      area.classList.toggle('wb-inspection', inspection);
-      if (!p) { area.innerHTML = '<div class="wb-empty wb-empty-full">暂无商品</div>'; return; }
-      const titleWeight = weight(p.title), a = media();
-      area.innerHTML = `<section class="wb-fields"><div class="wb-category"><label for="wbCategory">原始类目</label><input id="wbCategory" value="${esc(p.category)}" data-wb-field="category" autocomplete="off">${button('清空','clear-category','wb-text')}</div><div class="wb-title-field"><label for="wbTitle">商品标题</label><input id="wbTitle" value="${esc(p.title)}" data-wb-field="title" aria-describedby="wbTitleCount" class="${titleWeight > 60 ? 'wb-invalid' : ''}" autocomplete="off"><span id="wbTitleCount" class="wb-title-count ${titleWeight > 60 ? 'wb-error' : ''}">${titleWeight}<span> / 60</span></span></div><div class="wb-product-line"><span>商品 ID <b>${esc(p.id)}</b></span><span>${esc(p.platform)}</span><span>${price(p)}</span><span>${p.skus.length} 个 SKU</span></div></section><section class="wb-media-section"><div class="wb-tabs" role="tablist" aria-label="媒体类型">${tabs.map(([key,label]) => `<button type="button" role="tab" aria-selected="${tab === key}" class="wb-tab ${tab === key ? 'wb-active' : ''}" data-wb-action="tab" data-value="${key}">${label}<span>${key === 'video' ? (p.video ? 1 : 0) : (p[key]?.length || 0)}</span></button>`).join('')}</div><div class="wb-media-toolbar"><label class="wb-check"><input type="checkbox" data-wb-all-media ${a.length && selectedMedia.size === a.length ? 'checked' : ''} ${!a.length ? 'disabled' : ''}>全选</label>${button('删除所选','delete-media-selected','wb-small',!selectedMedia.size ? 'disabled' : '', 'trash')}<span class="wb-spacer"></span>${tab === 'video' ? button('生成视频','ai-video','wb-small','','sparkle') : tab === 'whiteImages' ? button('生成白底图','ai-white','wb-small','','sparkle') : button('AI 创作','ai','wb-small','','sparkle')}<label class="wb-button wb-small wb-upload">${icon('plus')}上传<input type="file" ${tab === 'video' ? 'accept="video/mp4,video/webm"' : 'accept="image/jpeg,image/png,image/webp,image/gif" multiple'} data-wb-upload></label></div><div class="wb-media-grid ${tab === 'video' ? 'wb-video-grid' : ''}">${a.map((path,i) => `<article class="wb-media-card"><div class="wb-card-head"><span>${String(i+1).padStart(2,'0')}</span><input type="checkbox" aria-label="选择图片 ${i+1}" data-wb-media="${i}" ${selectedMedia.has(i) ? 'checked' : ''}></div>${tab === 'video' ? `<video controls playsinline preload="metadata" src="${esc(videoSrc(path))}" poster="${esc(src(p.main[0]))}"></video>` : `<button type="button" class="wb-image" data-wb-action="zoom" data-index="${i}" aria-label="放大图片 ${i+1}"><img src="${esc(src(path))}" alt="${esc(p.shortTitle)} · ${tabs.find(t=>t[0]===tab)[1]} ${i+1}" data-wb-preview="${i}"></button>`}<div class="wb-image-actions">${inspection && tab !== 'video' ? button(p.reviewedImages?.includes(path) ? '已鉴图' : '标记已鉴图','review-image','wb-small wb-reviewed',`data-index="${i}"`,p.reviewedImages?.includes(path)?'check':'') : ''}${tab !== 'video' ? `${ib('前移图片 '+(i+1),'media-prev','prev',`data-index="${i}" ${i===0 ? 'disabled' : ''}`)}${ib('后移图片 '+(i+1),'media-next','next',`data-index="${i}" ${i===a.length-1 ? 'disabled' : ''}`)}` : ''}<span class="wb-spacer"></span>${ib('删除图片 '+(i+1),'delete-media','trash',`data-index="${i}" ${tab==='main' && a.length===1 ? 'disabled' : ''}`)}</div></article>`).join('')}${!a.length ? `<div class="wb-empty wb-empty-media">${icon(tab==='video' ? 'folder' : 'image')}<span>暂无${tabs.find(t=>t[0]===tab)[1]}</span></div>` : ''}</div></section><section class="wb-skus"><div class="wb-section-head"><h2>SKU 规格 <span>${p.skus.length}</span></h2><span class="wb-spacer"></span>${button('批量改价','batch-price','wb-small')}${button('添加 SKU','add-sku','wb-small','','plus')}</div><div class="wb-sku-wrap"><table class="wb-sku-table"><thead><tr><th>规格</th><th>SKU ID</th><th>价格 / ¥</th><th>库存</th><th></th></tr></thead><tbody>${p.skus.map((s,i) => `<tr><td><div class="wb-sku-name">${s.image ? `<img src="${esc(src(s.image))}" alt="${esc(s.name)}">` : ''}<input aria-label="SKU ${i+1} 规格" value="${esc(s.name)}" data-wb-sku="${i}" data-field="name"></div></td><td class="wb-sku-id">${esc(s.id)}</td><td><input type="number" min="0" max="100000000" step="0.01" aria-label="SKU ${i+1} 价格" value="${esc(s.price)}" data-wb-sku="${i}" data-field="price"></td><td><input type="number" min="0" max="100000000" step="1" aria-label="SKU ${i+1} 库存" value="${esc(s.stock)}" data-wb-sku="${i}" data-field="stock"></td><td>${ib('删除 SKU '+(i+1),'delete-sku','trash',`data-index="${i}" ${p.skus.length===1 ? 'disabled' : ''}`)}</td></tr>`).join('')}</tbody></table></div></section>`;
+      const p=draft(),area=$('[data-wb-editor]'); area.classList.toggle('wb-inspection',inspection);
+      if(!p){area.innerHTML='<div class="wb-empty wb-empty-full">暂无商品</div>';return;}
+      const titleWeight=weight(p.title);
+      area.innerHTML=`<section class="wb-fields"><div class="wb-category"><label for="wbCategory">原始类目</label><input id="wbCategory" value="${esc(p.category)}" data-wb-field="category" autocomplete="off">${button('清空','clear-category','wb-text')}</div><div class="wb-title-field"><label for="wbTitle">商品标题</label><input id="wbTitle" value="${esc(p.title)}" data-wb-field="title" aria-describedby="wbTitleCount" class="${titleWeight>60?'wb-invalid':''}" autocomplete="off"><span id="wbTitleCount" class="wb-title-count ${titleWeight>60?'wb-error':''}">${titleWeight}<span> / 60</span></span></div><div class="wb-product-line"><span>商品 ID <b>${esc(sourceId(p))}</b></span><span>${esc(p.platform)}</span><span>${price(p)}</span><span>${p.skus.length} 个 SKU</span><div class="wb-copy-actions">${button('复制 ID','copy-id','wb-text wb-small') }${button('复制标题','copy-title','wb-text wb-small')}${button('复制链接','copy-link','wb-text wb-small')}</div></div></section>
+        ${inspection?`<div class="wb-inspection-bar"><strong>人工鉴图</strong><span>${products.filter(reviewed).length} / ${products.length} 已完成</span><span class="wb-spacer"></span>${button('ID 加入黑名单','blacklist-current','wb-small')}${button('标记已鉴图并下一件','review-next','wb-small wb-primary','','check')}</div>`:''}
+        ${renderMedia(p)}<section class="wb-skus"><div class="wb-section-head"><h2>SKU 规格 <span>${p.skus.length}</span></h2><span class="wb-spacer"></span>${button('批量改价','batch-price','wb-small')}${button('批量改库存','batch-stock','wb-small')}${button('添加 SKU','add-sku','wb-small','','plus')}</div><div class="wb-sku-wrap"><table class="wb-sku-table"><thead><tr><th>规格</th><th>SKU ID</th><th>价格 / ¥</th><th>库存</th><th></th></tr></thead><tbody>${p.skus.map((s,i)=>`<tr><td><div class="wb-sku-name">${s.image?`<img src="${esc(src(s.image))}" alt="${esc(s.name)}">`:''}<input aria-label="SKU ${i+1} 规格" value="${esc(s.name)}" data-wb-sku="${i}" data-field="name"></div></td><td class="wb-sku-id">${esc(s.id)}</td><td><input type="number" min="0" max="100000000" step="0.01" aria-label="SKU ${i+1} 价格" value="${esc(s.price)}" data-wb-sku="${i}" data-field="price"></td><td><input type="number" min="0" max="100000000" step="1" aria-label="SKU ${i+1} 库存" value="${esc(s.stock)}" data-wb-sku="${i}" data-field="stock"></td><td>${ib('删除 SKU '+(i+1),'delete-sku','trash',`data-index="${i}" ${p.skus.length===1?'disabled':''}`)}</td></tr>`).join('')}</tbody></table></div></section>`;
     }
     function render() {
-      dialog.innerHTML = `<header class="wb-header"><div class="wb-heading">${icon('folder')}<h1 title="${esc(options.packageName || '')}">数据包详情</h1><span data-wb-count>${products.length} 件商品</span></div><div class="wb-header-right"><span class="wb-status ${error ? 'wb-error' : ''}" data-wb-status role="status">${esc(error || status)}</span><label class="wb-check wb-autosave"><input type="checkbox" data-wb-auto ${auto ? 'checked' : ''}>自动保存</label>${ib('关闭数据包详情','close','close')}</div></header><div class="wb-toolbar">${button('人工鉴图','review','wb-primary')}${button('低价检测','low-price')}${button('批量删除','delete-selected','wb-danger',!selected.size ? 'disabled' : '', 'trash')}${button('删除本页','delete-page','wb-danger')}${button('黑名单','blacklist')}${button('添加 SKU','add-sku')}${button('导出数据包','export','','','download')}<span class="wb-spacer"></span>${button('删除商品','delete-product','wb-danger')}${button('撤销','undo','','','undo')}${button('保存 (F)','save','wb-primary','','check')}</div><div class="wb-layout"><aside class="wb-sidebar"><div class="wb-sidebar-head"><h2>商品列表</h2>${ib('追加数据包','append','plus')}${ib('刷新列表','refresh','refresh')}</div><div class="wb-search">${icon('search')}<input aria-label="搜索商品" placeholder="搜索商品" data-wb-query value="${esc(query)}"></div><select class="wb-filter" aria-label="筛选商品" data-wb-filter><option value="all" ${filter==='all'?'selected':''}>全部商品</option><option value="selected" ${filter==='selected'?'selected':''}>已选择</option><option value="low" ${filter==='low'?'selected':''}>低于 SKU 均价 50%</option><option value="empty" ${filter==='empty'?'selected':''}>含零库存 SKU</option></select><div class="wb-product-list" data-wb-list></div><footer class="wb-pagination" data-wb-pagination></footer><div class="wb-navigation">${button('上一件 (W)','product-prev','wb-small','','prev')}${button('下一件 (S)','product-next','wb-small','','next')}</div></aside><main class="wb-editor" data-wb-editor></main></div><footer class="wb-bottom"><span>图映</span><span class="wb-spacer"></span>${button('删除数据包 (D)','delete-package','wb-text wb-danger')}</footer>`;
+      dialog.innerHTML = `<header class="wb-header"><div class="wb-heading">${icon('folder')}<h1 title="${esc(options.packageName || '')}">数据包详情</h1><span data-wb-count>${products.length} 件商品</span></div><div class="wb-header-right"><span class="wb-status ${error ? 'wb-error' : ''}" data-wb-status role="status">${esc(error || status)}</span><label class="wb-check wb-autosave"><input type="checkbox" data-wb-auto ${auto ? 'checked' : ''}>自动保存</label>${ib('关闭数据包详情','close','close')}</div></header><div class="wb-toolbar">${button(inspection?'结束鉴图':'人工鉴图','review','wb-primary')}${button('低价检测','low-price')}${button('批量删除','delete-selected','wb-danger',!selected.size ? 'disabled' : '', 'trash')}${button('删除本页','delete-page','wb-danger')}${button('黑名单','blacklist')}${button('添加 SKU','add-sku')}${button('导出数据包','export','','','download')}<span class="wb-spacer"></span>${button('删除商品','delete-product','wb-danger')}${button('撤销','undo','','','undo')}${button('保存 (F)','save','wb-primary','','check')}</div><div class="wb-layout"><aside class="wb-sidebar"><div class="wb-sidebar-head"><h2>商品列表</h2>${ib('追加数据包','append','plus')}${ib('刷新列表','refresh','refresh')}</div><div class="wb-search">${icon('search')}<input aria-label="搜索商品" placeholder="搜索商品" data-wb-query value="${esc(query)}"></div><select class="wb-filter" aria-label="筛选商品" data-wb-filter><option value="all" ${filter==='all'?'selected':''}>全部商品</option><option value="selected" ${filter==='selected'?'selected':''}>已选择</option><option value="low" ${filter==='low'?'selected':''}>低于 SKU 均价 50%</option><option value="empty" ${filter==='empty'?'selected':''}>含零库存 SKU</option></select><div class="wb-list-options"><label class="wb-check"><input type="checkbox" data-wb-unreviewed ${unreviewedOnly?'checked':''}>未鉴图</label><label class="wb-check"><input type="checkbox" data-wb-include-blacklist ${includeBlacklisted?'checked':''}>含黑名单</label></div><div class="wb-list-selection">${button('全选','select-all','wb-text wb-small')}${button('反选','invert-selection','wb-text wb-small')}<span data-wb-selection-count></span></div><div class="wb-product-list" data-wb-list></div><footer class="wb-pagination" data-wb-pagination></footer><div class="wb-navigation">${button('上一件 (W)','product-prev','wb-small','','prev')}${button('下一件 (S)','product-next','wb-small','','next')}</div></aside><main class="wb-editor" data-wb-editor></main></div><footer class="wb-bottom"><span>图映</span><span class="wb-spacer"></span>${button('删除数据包 (D)','delete-package','wb-text wb-danger')}</footer>`;
       dialog.append(preview); renderList(); renderEditor();
     }
     function hideHover() { clearTimeout(hoverTimer); if (preview.matches(':popover-open')) preview.hidePopover(); }
@@ -133,8 +153,8 @@
     }
     async function removeProducts(ids) {
       clearTimeout(saveTimer);
-      for (const id of ids) { await options.onDelete?.(id); const index = products.findIndex(p=>p.id===id); if (index>=0) products.splice(index,1); selected.delete(id); drafts.delete(id); histories.delete(id); }
-      if (!products.some(p=>p.id===activeId)) activeId = products[0]?.id;
+      for (const id of ids) { const accepted=await options.onDelete?.(id);if(accepted===false)throw new Error('删除失败，商品已保留');const index = products.findIndex(p=>p.id===id); if (index>=0) products.splice(index,1); selected.delete(id); drafts.delete(id); histories.delete(id); }
+      if (!products.some(p=>p.id===activeId)) activeId = list()[0]?.id;
       selectedMedia.clear(); setStatus(`已删除 ${ids.length} 件商品`); renderList(); renderEditor();
     }
     async function finish(callback) {
@@ -143,13 +163,26 @@
       hideHover(); document.removeEventListener('keydown', keydown); dialog.close(); dialog.remove(); current = null; options.onClose?.(); callback?.(); return true;
     }
     function removeMedia(indices) {
-      const p=draft(), a=media();
-      if (tab==='main' && a.length - indices.size < 1) { setStatus('','至少保留 1 张主图'); return; }
-      remember();
-      if (tab === 'skuImages') { const removed = new Set([...indices].map(i=>a[i])); p.skus.forEach(s=>{if(removed.has(s.image))s.image='';}); }
-      if (p.reviewedImages) p.reviewedImages = p.reviewedImages.filter(path=>![...indices].some(i=>a[i]===path));
-      if (tab==='video') p.video=''; else p[tab] = a.filter((_,i)=>!indices.has(i));
-      selectedMedia.clear(); changed(true);
+      const p=draft(), a=media(), role=mediaRole(), removed=new Set([...indices].filter(i=>i>=0&&i<a.length).map(i=>a[i]));
+      if(!p||!removed.size)return;
+      const next=copy(p);
+      if(tab==='video')next.video='';
+      else {
+        if(sameLinks)imageRoles.forEach(key=>{next[key]=next[key].filter(path=>!removed.has(path));});
+        else next[role]=a.filter((_,i)=>!indices.has(i));
+        if(!next.main.length){setStatus('','至少保留 1 张 1:1 主图');return;}
+        const deletedSkuPaths=new Set(p.skuImages.filter(path=>!next.skuImages.includes(path)));
+        if(role==='skuImages'&&deleteLinkedSkus){
+          next.skus=next.skus.filter(s=>!deletedSkuPaths.has(s.image));
+          if(!next.skus.length){setStatus('','至少保留 1 个 SKU');return;}
+        }
+        next.skus.forEach(s=>{if(deletedSkuPaths.has(s.image)||sameLinks&&removed.has(s.image))s.image='';});
+      }
+      const apply=()=>{remember();drafts.set(p.id,next);next.reviewedImages=[];sync(next);selectedMedia.clear();changed(true);};
+      if(sameLinks||role==='skuImages'&&deleteLinkedSkus){
+        const removedImages=imageRoles.reduce((sum,key)=>sum+p[key].length-next[key].length,0),removedSkus=p.skus.length-next.skus.length;
+        confirm('删除当前商品图片',`图片 ${removedImages} 张${removedSkus?` · 关联 SKU ${removedSkus} 个`:''}`,apply);
+      }else apply();
     }
     function skuDialog() {
       if (!draft()) return;
@@ -159,18 +192,75 @@
       });
     }
     function lowPrice() {
-      panel('低价检测', `<div class="wb-threshold"><select aria-label="低价规则" data-wb-low-mode><option value="relative">低于商品 SKU 均价的 50%</option><option value="fixed">固定阈值</option></select><input type="number" aria-label="价格阈值" min="0" step="0.01" value="20" data-wb-threshold hidden><span data-wb-threshold-unit hidden>元</span></div><div data-wb-low-results></div>`, '', el => {
-        const update = () => { const fixed=el.querySelector('[data-wb-low-mode]').value==='fixed', input=el.querySelector('[data-wb-threshold]'); input.hidden=!fixed; el.querySelector('[data-wb-threshold-unit]').hidden=!fixed; const limit=Number(input.value); const hits=products.flatMap(p=>p.skus.filter(s=>s.price<(fixed?limit:lowLimit(p))).map(s=>({p,s}))); el.querySelector('[data-wb-low-results]').innerHTML = hits.length ? hits.map(({p,s})=>`<button type="button" class="wb-low-row" data-id="${esc(p.id)}"><span><strong>${esc(p.shortTitle)}</strong><small>${esc(s.name)}</small></span><b>¥${Number(s.price).toFixed(2)}</b>${icon('next')}</button>`).join('') : '<div class="wb-empty">无低价 SKU</div>'; el.querySelectorAll('.wb-low-row').forEach(b=>b.onclick=()=>{el.close();activate(b.dataset.id);}); };
-        el.querySelector('[data-wb-threshold]').oninput=update; el.querySelector('[data-wb-low-mode]').onchange=update; update();
+      panel('低价检测', `<div class="wb-threshold"><select aria-label="低价规则" data-wb-low-mode><option value="relative">低于商品 SKU 均价的 50%</option><option value="fixed">固定阈值</option></select><input type="number" aria-label="价格阈值" min="0" max="100000000" step="0.01" value="20" data-wb-threshold hidden><span data-wb-threshold-unit hidden>元</span></div><div class="wb-section-head"><h2 data-wb-low-count></h2><span class="wb-spacer"></span><button type="button" class="wb-button wb-small wb-danger" data-wb-low-remove-all>移除全部命中 SKU</button></div><div class="wb-error" role="status" data-wb-low-error></div><div data-wb-low-results></div>`, '', el => {
+        let hits=[];
+        const update=()=>{
+          const fixed=el.querySelector('[data-wb-low-mode]').value==='fixed',input=el.querySelector('[data-wb-threshold]'),limit=Number(input.value);input.hidden=!fixed;el.querySelector('[data-wb-threshold-unit]').hidden=!fixed;
+          const issue=fixed&&(input.value.trim()===''||!Number.isFinite(limit)||limit<0||limit>100000000)?'请输入有效价格阈值':'';el.querySelector('[data-wb-low-error]').textContent=issue;
+          hits=issue?[]:products.filter(p=>!isBlacklisted(p)).flatMap(p=>p.skus.filter(s=>s.price<(fixed?limit:lowLimit(p))).map(s=>({p,s,limit:fixed?limit:lowLimit(p)})));
+          el.querySelector('[data-wb-low-count]').textContent=`命中 ${hits.length} 个 SKU`;el.querySelector('[data-wb-low-remove-all]').disabled=!hits.length;
+          el.querySelector('[data-wb-low-results]').innerHTML=hits.length?hits.map(({p,s,limit},i)=>`<div class="wb-low-result"><button type="button" class="wb-low-row" data-open-id="${esc(p.id)}"><span><strong>${esc(p.shortTitle||p.title)}</strong><small>${esc(s.name)}</small><small>均价 ¥${(lowLimit(p)*2).toFixed(2)} · 阈值 ¥${limit.toFixed(2)}</small></span><b>¥${Number(s.price).toFixed(2)}</b></button><button type="button" class="wb-button wb-small wb-danger" data-remove-hit="${i}" ${p.skus.length===1?'disabled':''}>移除</button></div>`).join(''):'<div class="wb-empty">无低价 SKU</div>';
+          el.querySelectorAll('[data-open-id]').forEach(b=>b.onclick=()=>{el.close();activate(b.dataset.openId);});
+          el.querySelectorAll('[data-remove-hit]').forEach(b=>b.onclick=()=>removeHits([hits[Number(b.dataset.removeHit)]]));
+        };
+        const removeHits=rows=>{
+          const grouped=new Map();rows.forEach(({p,s})=>{if(!grouped.has(p.id))grouped.set(p.id,new Set());grouped.get(p.id).add(s.id);});
+          if([...grouped].some(([id,ids])=>products.find(p=>p.id===id).skus.length<=ids.size)){el.querySelector('[data-wb-low-error]').textContent='每件商品至少保留 1 个 SKU';return;}
+          confirm('移除低价 SKU',`${grouped.size} 件商品 · ${rows.length} 个 SKU`,async()=>{
+            for(const [id,ids] of grouped){
+              const p=drafts.get(id)||copy(products.find(p=>p.id===id));drafts.set(id,p);const history=histories.get(id)||[];history.push(copy(p));histories.set(id,history);
+              p.skus=p.skus.filter(s=>!ids.has(s.id));sync(p);
+              if(!await commit(p)){activeId=id;renderList();renderEditor();el.close();return;}
+            }
+            renderEditor();update();
+          });
+        };
+        el.querySelector('[data-wb-low-remove-all]').onclick=()=>removeHits(hits);el.querySelector('[data-wb-threshold]').oninput=update;el.querySelector('[data-wb-low-mode]').onchange=update;update();
       });
     }
     function blacklist() {
-      let words=[]; const key='tuying-workbench-blacklist:'+location.pathname; try { words=JSON.parse(localStorage.getItem(key)||'[]'); } catch {}
-      panel('黑名单管理','<form class="wb-blacklist-form"><input name="word" placeholder="添加关键词" aria-label="黑名单关键词" required><button type="submit" class="wb-button wb-primary">添加</button></form><div class="wb-blacklist-words"></div><div class="wb-blacklist-matches"></div>','',el=>{
-        const draw=()=>{el.querySelector('.wb-blacklist-words').innerHTML=words.map((w,i)=>`<button type="button" class="wb-word" data-index="${i}">${esc(w)} ${icon('close')}</button>`).join(''); const matches=products.filter(p=>words.some(w=>p.title.includes(w))); el.querySelector('.wb-blacklist-matches').innerHTML=matches.length ? `<div class="wb-section-head"><h2>匹配商品 <span>${matches.length}</span></h2></div>`+matches.map(p=>`<button class="wb-low-row" type="button" data-id="${esc(p.id)}"><span>${esc(p.shortTitle)}</span>${icon('next')}</button>`).join('') : '<div class="wb-empty">无匹配商品</div>'; el.querySelectorAll('.wb-word').forEach(b=>b.onclick=()=>{words.splice(Number(b.dataset.index),1);persist();}); el.querySelectorAll('.wb-low-row').forEach(b=>b.onclick=()=>{el.close();activate(b.dataset.id);});};
-        const persist=()=>{try{localStorage.setItem(key,JSON.stringify(words));}catch{} draw();};
-        el.querySelector('form').onsubmit=ev=>{ev.preventDefault();const input=el.querySelector('[name="word"]'),word=input.value.trim();if(word&&!words.includes(word))words.push(word);input.value='';persist();}; draw();
+      const platforms=[...new Set(['1688','淘宝','拼多多','京东','抖音',...products.map(p=>p.platform)])];
+      panel('黑名单管理',`<form class="wb-panel-form"><label>来源平台<select name="platform">${platforms.map(platform=>`<option value="${esc(platform)}">${esc(platform)}</option>`).join('')}</select></label><label>商品 ID<textarea name="ids" rows="3" aria-label="黑名单商品 ID" placeholder="多个 ID 用换行、逗号或空格分隔" required></textarea></label><button type="submit" class="wb-button wb-primary">添加到黑名单</button></form><div class="wb-section-head"><h2 data-wb-blacklist-count></h2><span class="wb-spacer"></span><button type="button" class="wb-button wb-small wb-danger" data-wb-clear-blacklist>清空</button></div><div data-wb-blacklist-list></div><div class="wb-error" role="status" data-wb-blacklist-error></div>`,'',el=>{
+        const draw=()=>{
+          el.querySelector('[data-wb-blacklist-count]').textContent=`商品 ${blacklistedIds.length}`;
+          el.querySelector('[data-wb-clear-blacklist]').disabled=!blacklistedIds.length;
+          el.querySelector('[data-wb-blacklist-list]').innerHTML=blacklistedIds.map((key,i)=>{const p=products.find(p=>blacklistKey(p)===key||sourceId(p)===key);return `<div class="wb-blacklist-row"><span><strong>${esc(p?.shortTitle||p?.title||key)}</strong><small>${esc(key)}</small></span><button type="button" class="wb-button wb-text wb-small" data-remove-index="${i}">移除</button></div>`;}).join('')||'<div class="wb-empty">黑名单为空</div>';
+          el.querySelectorAll('[data-remove-index]').forEach(b=>b.onclick=()=>persist(blacklistedIds.filter((_,i)=>i!==Number(b.dataset.removeIndex))));
+        };
+        const persist=async keys=>{el.querySelector('[data-wb-blacklist-error]').textContent='';try{if(!await updateBlacklist(keys))throw new Error('黑名单保存失败');draw();return true;}catch(err){el.querySelector('[data-wb-blacklist-error]').textContent=err.message||'黑名单保存失败';return false;}};
+        el.querySelector('form').onsubmit=async ev=>{ev.preventDefault();const form=ev.target,platform=form.elements.platform.value,ids=form.elements.ids.value.split(/[\s,，]+/).filter(Boolean),b=form.querySelector('button');b.disabled=true;try{if(await persist([...new Set([...blacklistedIds,...ids.map(id=>`${platform}:${id}`)])]))form.elements.ids.value='';}finally{b.disabled=false;}};
+        el.querySelector('[data-wb-clear-blacklist]').onclick=()=>confirm('清空黑名单',`${blacklistedIds.length} 个商品 ID`,()=>persist([])); draw();
       });
+    }
+    async function updateBlacklist(keys) {
+      if(!await guard())return false;
+      const accepted=await options.onBlacklistChange?.([...keys]);if(accepted===false)return false;
+      blacklistedIds=[...keys];
+      products.filter(isBlacklisted).forEach(p=>selected.delete(p.id));
+      if(!includeBlacklisted&&original()&&isBlacklisted(original())){activeId=list()[0]?.id;selectedMedia.clear();}
+      renderList();renderEditor();return true;
+    }
+    function batchSku(field) {
+      const p=draft();if(!p)return;
+      const isPrice=field==='price',label=isPrice?'价格':'库存',format=value=>isPrice?`¥${Number(value).toFixed(2)}`:String(value);
+      panel(`批量改${isPrice?'价':'库存'}`,`<form class="wb-panel-form" id="wbBatchSkuForm"><label>SKU 范围<select name="scope"><option value="all">全部 SKU</option><option value="stock">仅有库存</option><option value="zero">零库存</option><option value="min">最低价 SKU</option><option value="max">最高价 SKU</option></select></label><div class="wb-form-row"><label>${label}调整<select name="mode"><option value="fixed">固定值</option><option value="add">增加</option><option value="subtract">减少</option><option value="multiply">倍率</option></select></label><label><span data-wb-batch-value-label>${isPrice?'价格 / ¥':'库存'}</span><input name="value" type="number" min="0" max="100000000" step="${isPrice?'0.01':'1'}" value="${isPrice?Number(p.price).toFixed(2):'100'}" required></label></div><div class="wb-batch-range">${isPrice?'价格 0–100,000,000 元 · 两位小数':'库存 0–100,000,000 · 整数'}</div><div class="wb-batch-preview" data-wb-batch-preview></div><div class="wb-error" role="status" data-wb-batch-error></div></form>`,'<button class="wb-button wb-primary" type="submit" form="wbBatchSkuForm" data-wb-batch-apply>应用</button>',el=>{
+        const form=el.querySelector('form'),preview=el.querySelector('[data-wb-batch-preview]'),issue=el.querySelector('[data-wb-batch-error]'),apply=el.querySelector('[data-wb-batch-apply]');
+        const calculate=()=>{
+          const mode=form.elements.mode.value,scope=form.elements.scope.value,input=form.elements.value,amount=Number(input.value),prices=p.skus.map(s=>Number(s.price)),edge=scope==='min'?Math.min(...prices):Math.max(...prices);
+          input.step=mode==='multiply'||isPrice?'0.01':'1';el.querySelector('[data-wb-batch-value-label]').textContent=mode==='multiply'?'倍率':isPrice?'价格 / ¥':'库存';
+          const rows=p.skus.map((s,i)=>({s,i})).filter(({s})=>scope==='all'||scope==='stock'&&Number(s.stock)>0||scope==='zero'&&Number(s.stock)===0||['min','max'].includes(scope)&&Number(s.price)===edge).map(({s,i})=>{const before=Number(s[field]),raw=mode==='fixed'?amount:mode==='add'?before+amount:mode==='subtract'?before-amount:before*amount,value=isPrice?Math.round((raw+Number.EPSILON)*100)/100:raw;return {s,i,before,value};});
+          let error=input.value.trim()===''||!Number.isFinite(amount)||amount<0?'请输入有效数值':!rows.length?'无匹配 SKU':rows.some(r=>!Number.isFinite(r.value)||r.value<0||r.value>100000000||!isPrice&&!Number.isInteger(r.value))?`${label}结果超出有效范围`:'';
+          preview.innerHTML=`<div class="wb-preview-total">${rows.length} 个 SKU</div>`+rows.map(r=>`<div class="wb-preview-row"><span>${esc(r.s.name)}</span><span>${esc(format(r.before))} <b>→</b> ${esc(format(r.value))}</span></div>`).join('');issue.textContent=error;apply.disabled=!!error;return {rows,error};
+        };
+        form.oninput=calculate;form.onchange=calculate;form.onsubmit=ev=>{ev.preventDefault();const {rows,error}=calculate();if(error)return;remember();const currentDraft=draft();rows.forEach(r=>currentDraft.skus[r.i][field]=r.value);sync(currentDraft);changed(true);el.close();};calculate();
+      });
+    }
+    async function copyProduct(field) {
+      const p=draft();if(!p)return;
+      const url=p.productUrl||p.sourceUrl||(p.platform==='1688'?`https://detail.1688.com/offer/${encodeURIComponent(sourceId(p))}.html`:'');
+      const value=field==='id'?sourceId(p):field==='title'?p.title:url;
+      if(!value){setStatus('','未保存原商品链接');return;}
+      try{await navigator.clipboard.writeText(value);setStatus('已复制');}catch{setStatus('','复制失败，请检查剪贴板权限');}
     }
     async function action(buttonEl) {
       const {wbAction: act,id,index,value}=buttonEl.dataset; const p=draft();
@@ -181,26 +271,33 @@
         case 'page-prev': page=Math.max(1,page-1);renderList();break;
         case 'page-next': page++;renderList();break;
         case 'refresh': renderList();setStatus('已刷新');break;
+        case 'select-all': list().forEach(p=>selected.add(p.id));renderList();break;
+        case 'invert-selection': list().forEach(p=>selected.has(p.id)?selected.delete(p.id):selected.add(p.id));renderList();break;
+        case 'copy-id': case 'copy-title': case 'copy-link': await copyProduct(act.slice(5));break;
         case 'save': await commit(p,true);break;
         case 'undo': {const h=histories.get(activeId);if(h?.length){clearTimeout(saveTimer);drafts.set(activeId,h.pop());changed(true);}break;}
         case 'tab': tab=value;selectedMedia.clear();renderEditor();break;
+        case 'main-role': if(['main','portraitMain'].includes(value)){mainRole=value;selectedMedia.clear();renderEditor();}break;
         case 'clear-category': if(p){remember();p.category='';changed(true);}break;
-        case 'media-prev': case 'media-next': {const a=media(),i=Number(index),to=i+(act==='media-prev'?-1:1); if(to>=0&&to<a.length){remember();[a[i],a[to]]=[a[to],a[i]];selectedMedia.clear();changed(true);}break;}
+        case 'media-prev': case 'media-next': {const a=media(),i=Number(index),to=i+(act==='media-prev'?-1:1); if(to>=0&&to<a.length){remember();[a[i],a[to]]=[a[to],a[i]];p.reviewedImages=[];selectedMedia.clear();changed(true);}break;}
         case 'delete-media': removeMedia(new Set([Number(index)]));break;
         case 'delete-media-selected': removeMedia(selectedMedia);break;
         case 'zoom': {const path=media()[Number(index)];panel('图片预览',`<img class="wb-zoom-image" src="${esc(src(path))}" alt="${esc(p.shortTitle)}">`,'',el=>el.classList.add('wb-zoom-panel'));break;}
         case 'delete-product': if(p)confirm('删除当前商品',esc(p.shortTitle||p.title),()=>removeProducts([p.id]));break;
         case 'delete-selected': if(selected.size)confirm('批量删除',`已选择 ${selected.size} 件商品`,()=>removeProducts([...selected]));break;
         case 'delete-page': {const ids=visible().map(x=>x.id);if(ids.length)confirm('删除本页商品',`共 ${ids.length} 件商品`,()=>removeProducts(ids));break;}
-        case 'delete-package': confirm('删除当前数据包',`共 ${products.length} 件商品`,async()=>{clearTimeout(saveTimer);await options.onDeletePackage?.();drafts.clear();hideHover();document.removeEventListener('keydown',keydown);dialog.close();dialog.remove();current=null;options.onClose?.();});break;
+        case 'delete-package': confirm('删除当前数据包',`共 ${products.length} 件商品`,async()=>{clearTimeout(saveTimer);if(await options.onDeletePackage?.()===false)throw new Error('删除失败，数据包已保留');drafts.clear();hideHover();document.removeEventListener('keydown',keydown);dialog.close();dialog.remove();current=null;options.onClose?.();});break;
         case 'add-sku': skuDialog();break;
         case 'delete-sku': if(p?.skus.length>1){remember();p.skus.splice(Number(index),1);sync(p);changed(true);}break;
-        case 'batch-price': if(p)panel('批量改价',`<form class="wb-panel-form" id="wbPriceForm"><label>统一价格 / ¥<input name="price" type="number" min="0" max="100000000" step="0.01" value="${Number(p.price).toFixed(2)}" required></label></form>`,'<button class="wb-button wb-primary" type="submit" form="wbPriceForm">应用</button>',el=>el.querySelector('form').onsubmit=ev=>{ev.preventDefault();remember();const v=Number(new FormData(ev.target).get('price'));draft().skus.forEach(s=>s.price=v);sync(draft());changed(true);el.close();});break;
-        case 'low-price': lowPrice();break;
+        case 'batch-price': batchSku('price');break;
+        case 'batch-stock': batchSku('stock');break;
+        case 'low-price': if(await guard())lowPrice();break;
         case 'blacklist': blacklist();break;
+        case 'blacklist-current': if(p){const next=list().find(x=>x.id!==p.id&&!isBlacklisted(x));if(!await updateBlacklist([...new Set([...blacklistedIds,blacklistKey(p)])]))setStatus('','黑名单保存失败');else if(next)await activate(next.id);}break;
         case 'ai': case 'ai-white': case 'ai-video': if(p)await finish(()=>options.onOpenAI?.(p.id,act==='ai-white'?'white':act==='ai-video'?'video':'scene'));break;
         case 'review': inspection=!inspection;buttonEl.textContent=inspection?'结束鉴图':'人工鉴图';renderEditor();break;
         case 'review-image': {const path=media()[Number(index)];remember();p.reviewedImages=p.reviewedImages||[];if(p.reviewedImages.includes(path))p.reviewedImages=p.reviewedImages.filter(x=>x!==path);else p.reviewedImages.push(path);changed(true);break;}
+        case 'review-next': if(p){const before=list(),at=before.findIndex(x=>x.id===p.id);remember();p.reviewedImages=imagePaths(p);changed();if(!await commit())break;const next=before.slice(at+1).find(x=>!reviewed(products.find(y=>y.id===x.id)))||list().find(x=>x.id!==p.id&&!reviewed(x));if(next)await activate(next.id);else{if(unreviewedOnly)activeId=undefined;setStatus('鉴图已完成');renderList();renderEditor();} }break;
         case 'export': await finish(()=>options.onExport?.(selected.size?[...selected]:products.map(x=>x.id)));break;
         case 'append': await finish(()=>options.onAppend?.());break;
       }
@@ -216,25 +313,34 @@
     dialog.addEventListener('change', async ev=>{
       const el=ev.target;
       if(el.matches('[data-wb-filter]')){filter=el.value;page=1;renderList();}
+      if(el.matches('[data-wb-unreviewed]')){unreviewedOnly=el.checked;page=1;renderList();if(!draft()&&list().length){activeId=list()[0].id;renderList();renderEditor();}}
+      if(el.matches('[data-wb-include-blacklist]')){if(!await guard()){el.checked=includeBlacklisted;return;}includeBlacklisted=el.checked;page=1;if(!includeBlacklisted&&original()&&isBlacklisted(original()))activeId=list()[0]?.id;else if(!original())activeId=list()[0]?.id;renderList();renderEditor();}
+      if(el.matches('[data-wb-same-links]'))sameLinks=el.checked;
+      if(el.matches('[data-wb-delete-skus]'))deleteLinkedSkus=el.checked;
       if(el.matches('[data-wb-auto]')){auto=el.checked;if(auto)await commit();else clearTimeout(saveTimer);}
       if(el.dataset.wbSelect){el.checked?selected.add(el.dataset.wbSelect):selected.delete(el.dataset.wbSelect);renderList();}
       if(el.hasAttribute('data-wb-media')){const i=Number(el.dataset.wbMedia);el.checked?selectedMedia.add(i):selectedMedia.delete(i);renderEditor();}
       if(el.matches('[data-wb-all-media]')){selectedMedia=el.checked?new Set(media().map((_,i)=>i)):new Set();renderEditor();}
       if(el.matches('[data-wb-upload]')){
         const files=[...el.files]; if(!files.length)return;
-        const p=draft(), group=tab; const limit=group==='video'?20*1024*1024:5*1024*1024;
+        const p=draft(), group=mediaRole(); const limit=group==='video'?20*1024*1024:5*1024*1024;
         if(files.some(f=>f.size>limit)){setStatus('',group==='video'?'视频不能超过 20 MB':'图片不能超过 5 MB');return;}
         const allowed=group==='video'?/^video\/(mp4|webm)$/:/^image\/(jpeg|png|webp|gif)$/;
         if(files.some(f=>!allowed.test(f.type))){setStatus('','文件格式不支持');return;}
-        try {const values=await Promise.all(files.map(file=>new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=reject;reader.readAsDataURL(file);})));if(p!==draft()||group!==tab)return;remember();if(group==='video')p.video=values[0];else p[group]=[...(p[group]||[]),...values];changed(true);}catch{setStatus('','读取文件失败');}
+        try {const values=await Promise.all(files.map(file=>new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=reject;reader.readAsDataURL(file);})));if(p!==draft()||group!==mediaRole())return;remember();if(group==='video')p.video=values[0];else p[group]=[...(p[group]||[]),...values];p.reviewedImages=[];sync(p);changed(true);}catch{setStatus('','读取文件失败');}
       }
     });
+    let dragging;
+    dialog.addEventListener('dragstart',ev=>{const card=ev.target.closest('[data-wb-drag]');if(!card||ev.target.closest('input'))return;dragging={id:activeId,role:mediaRole(),index:Number(card.dataset.wbDrag)};ev.dataTransfer.effectAllowed='move';ev.dataTransfer.setData('text/plain',String(dragging.index));card.classList.add('wb-dragging');hideHover();});
+    dialog.addEventListener('dragover',ev=>{if(dragging&&ev.target.closest('[data-wb-drag]')){ev.preventDefault();ev.dataTransfer.dropEffect='move';}});
+    dialog.addEventListener('drop',ev=>{const card=ev.target.closest('[data-wb-drag]');if(!card||!dragging)return;ev.preventDefault();const to=Number(card.dataset.wbDrag),a=media();if(dragging.id===activeId&&dragging.role===mediaRole()&&dragging.index!==to&&to<a.length){remember();const [path]=a.splice(dragging.index,1);a.splice(to,0,path);draft().reviewedImages=[];selectedMedia.clear();changed(true);}dragging=undefined;});
+    dialog.addEventListener('dragend',()=>{dragging=undefined;dialog.querySelectorAll('.wb-dragging').forEach(el=>el.classList.remove('wb-dragging'));});
     dialog.addEventListener('pointerover',ev=>{const img=ev.target.closest('[data-wb-preview]');if(img)hoverImage(img);});
     dialog.addEventListener('pointerout',ev=>{if(ev.target.matches('[data-wb-preview]'))hideHover();});
     dialog.addEventListener('cancel',ev=>{if(ev.target===dialog){ev.preventDefault();finish();}});
     function keydown(ev) {
       if(!dialog.open||dialog.querySelector('dialog[open]')||ev.isComposing||ev.ctrlKey||ev.metaKey||ev.altKey||ev.repeat||ev.target.closest('input,textarea,select,[contenteditable="true"]'))return;
-      const act={w:'product-prev',s:'product-next',f:'save',d:'delete-package'}[ev.key.toLowerCase()];if(act){ev.preventDefault();dialog.querySelector(`[data-wb-action="${act}"]`)?.click();}
+      const act={w:'product-prev',s:'product-next',f:'save',d:'delete-package',...(inspection?{arrowleft:'product-prev',arrowright:'review-next'}:{})}[ev.key.toLowerCase()];if(act){ev.preventDefault();dialog.querySelector(`[data-wb-action="${act}"]`)?.click();}
     }
     document.addEventListener('keydown',keydown); render(); dialog.showModal(); if (options.initialTab === 'sku') $('.wb-skus')?.scrollIntoView({block:'start'}); return dialog;
   }
