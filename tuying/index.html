@@ -6,14 +6,15 @@
   <meta name="theme-color" content="#20352e">
   <title>图映 · 数据包管理</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='12' fill='%2320352e'/%3E%3Cpath d='M13 15h22v18H13zM18 28l5-5 5 5 4-4M19 20h.1' fill='none' stroke='%23e7eee7' stroke-width='2' stroke-linejoin='round' stroke-linecap='round'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="styles.css?v=20260922-parity3">
-  <link rel="stylesheet" href="workbench.css?v=20260922-parity3">
-  <link rel="stylesheet" href="bulk.css?v=20260922-parity3">
-  <script src="data.js?v=20260922-parity3" defer></script>
-  <script src="core.js?v=20260922-parity3" defer></script>
-  <script src="workbench.js?v=20260922-parity3" defer></script>
-  <script src="bulk.js?v=20260922-parity3" defer></script>
-  <script src="app.js?v=20260922-parity3" defer></script>
+  <link rel="stylesheet" href="styles.css?v=20260922-lists4">
+  <link rel="stylesheet" href="workbench.css?v=20260922-lists4">
+  <link rel="stylesheet" href="bulk.css?v=20260922-lists4">
+  <link rel="stylesheet" href="lists.css?v=20260922-lists4">
+  <script src="data.js?v=20260922-lists4" defer></script>
+  <script src="core.js?v=20260922-lists4" defer></script>
+  <script src="workbench.js?v=20260922-lists4" defer></script>
+  <script src="bulk.js?v=20260922-lists4" defer></script>
+  <script src="app.js?v=20260922-lists4" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main">跳到内容</a>
@@ -22,6 +23,7 @@
       <span class="brand-mark"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M8 6h16a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Z"/><path d="m6 21 7-7 6 6 3-3 4 4M21 11h.01"/></svg></span>
       <span>图映</span><span class="brand-period">.</span>
     </a>
+    <div class="sidebar-scroll">
     <nav class="primary-nav" aria-label="工作区">
       <button class="nav-item active" data-nav="library" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.6"/><rect x="14" y="3" width="7" height="7" rx="1.6"/><rect x="3" y="14" width="7" height="7" rx="1.6"/><rect x="14" y="14" width="7" height="7" rx="1.6"/></svg><span>数据包管理</span><span class="nav-count" id="libraryCount">1</span></button>
       <button class="nav-item" data-nav="albums" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h8M8 17h4"/></svg><span>图包管理</span></button><button class="nav-item" data-nav="bulk" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h8M8 17h4"/></svg><span>批量处理</span></button><button class="nav-item" data-nav="inspect" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h8M8 17h4"/></svg><span>人工鉴图</span></button><button class="nav-item" data-nav="words" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h8M8 17h4"/></svg><span>违规词库</span></button><button class="nav-item" data-nav="media" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h8M8 17h4"/></svg><span>媒体资源</span></button><button class="nav-item" data-nav="studio" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3ZM20 15l.8 2.2L23 18l-2.2.8L20 21l-.8-2.2L17 18l2.2-.8L20 15ZM4 2v4M2 4h4"/></svg><span>AI 创作</span></button>
@@ -35,6 +37,7 @@
       <button class="sidebar-group" data-group="秋日童装" type="button"><span class="group-dot dot-olive"></span><span>秋日童装</span><span id="groupCountAutumn">5</span></button>
       <button class="sidebar-group" data-group="夏日轻装" type="button"><span class="group-dot dot-sand"></span><span>夏日轻装</span><span id="groupCountSummer">5</span></button>
     </nav>
+    </div>
     <div class="sidebar-bottom">
       <button class="workspace-switch" data-action="reset" type="button" aria-label="重置演示"><span class="workspace-avatar">图</span><span class="workspace-name">我的工作区<span class="demo-badge">DEMO</span></span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M20 12a8 8 0 1 0-2.2 5.5"/></svg></button>
     </div>
