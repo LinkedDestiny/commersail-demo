@@ -8,7 +8,7 @@
   const e = C.escapeHTML;
   const clone = value => JSON.parse(JSON.stringify(value));
   const STORE = 'tuying-interactive-demo-v1:' + location.pathname;
-  const names = { library: '商品资产', studio: 'AI 创作', review: '风险检查', export: '转换导出', tasks: '任务中心' };
+  const names = { library: '数据包管理', studio: 'AI 创作', review: '风险检查', export: '转换导出', tasks: '任务中心' };
   const paths = {
     plus: '<path d="M12 5v14M5 12h14"/>', search: '<circle cx="10.8" cy="10.8" r="7.3"/><path d="m16 16 4.5 4.5"/>',
     grid: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
@@ -48,7 +48,9 @@
   let stored;
   try { stored = JSON.parse(localStorage.getItem(STORE) || 'null'); } catch { stored = null; }
   const state = {
-    products: Array.isArray(stored?.products) ? stored.products : clone(seed),
+    products: (Array.isArray(stored?.products) ? stored.products : clone(seed)).map(p=>({...p,packageId:p.packageId||'pack-default'})),
+    packs: Array.isArray(stored?.packs) ? stored.packs : [{id:'pack-default',name:'阿里2026年09月21日18时26分16秒',group:'未分组',type:'数据包',createdAt:'2026/09/22 13:05',updatedAt:'2026/09/22 13:05',note:''}],
+    libraryMode:'packages', packageQuery:'', packageGroup:'all', packageType:'all', selectedPacks:new Set(), pendingImportPackId:null,
     groups: stored?.groups || ['秋日童装', '夏日轻装'],
     favorites: stored?.favorites || [], generated: stored?.generated || [],
     tasks: (stored?.tasks || []).map(t => t.status === 'running' ? { ...t, status: 'cancelled' } : t),
@@ -64,9 +66,9 @@
   const getProduct = id => state.products.find(p => p.id === id);
   function save() {
     // ponytail: browser storage is enough for this small demo; a real asset library needs a database.
-    const { products, groups, favorites, generated, tasks, checked, ignored, scanned, rules } = state;
-    try { localStorage.setItem(STORE, JSON.stringify({ products, groups, favorites, generated, tasks, checked, ignored, scanned, rules })); }
-    catch { toast('当前更改仅保留至本次关闭'); }
+    const { products, packs, groups, favorites, generated, tasks, checked, ignored, scanned, rules } = state;
+    try { localStorage.setItem(STORE, JSON.stringify({ products, packs, groups, favorites, generated, tasks, checked, ignored, scanned, rules })); return true; }
+    catch { toast('本地存储已满，未能保存'); return false; }
   }
   function toast(message, undo) {
     clearTimeout(toastTimer); undoAction = undo || null;
@@ -90,13 +92,33 @@
     $('[id="breadcrumb"]').textContent = names[state.page];
     $$('[data-nav]').forEach(el => { el.classList.toggle('active', el.dataset.nav === state.page); el.setAttribute('aria-current', el.dataset.nav === state.page ? 'page' : 'false'); });
     $$('[data-group]').forEach(el => el.classList.toggle('active', state.page === 'library' && state.group === el.dataset.group));
-    $('#libraryCount').textContent = state.products.length;
+    $('#libraryCount').textContent = state.packs.length;
     $('.group-nav').innerHTML = `<button class="sidebar-group ${state.group==='all'?'active':''}" data-group="all">${icon('folder')}<span>全部商品</span><span>${state.products.length}</span></button>` + state.groups.map((g,i)=>`<button class="sidebar-group ${state.group===g?'active':''}" data-group="${e(g)}"><span class="group-dot ${i%2?'dot-sand':'dot-olive'}"></span><span>${e(g)}</span><span>${state.products.filter(p=>p.group===g).length}</span></button>`).join('');
     $('#taskDot').hidden = !state.tasks.some(t=>t.status==='running');
     $('#menuMobile').setAttribute('aria-expanded',String(document.body.classList.contains('sidebar-open')));
     main.innerHTML = ({ library: library, studio: studio, review: review, export: exportPage, tasks: tasksPage })[state.page]();
   }
   function library() {
+    if(state.libraryMode==='products') return `<div class="pk-back">${btn('数据包管理','package-home','ghost','','left')}</div>`+productLibrary();
+    const packs=state.packs.filter(p=>(state.packageType==='all'||p.type===state.packageType)&&(state.packageGroup==='all'||p.group===state.packageGroup)&&(!state.packageQuery||p.name.toLowerCase().includes(state.packageQuery.toLowerCase())));
+    return head('数据包管理',btn('商品视图','product-view','','','grid')+btn('添加数据包','import','primary','','plus'),`${state.packs.length} 个数据包`)+
+      `<section class="pk-filters"><div class="pk-filter-fields"><div class="segmented pk-type">${[['all','全部'],['数据包','数据包'],['图包','图包']].map(([key,label])=>`<button class="segment ${state.packageType===key?'active':''}" data-action="package-type" data-value="${key}">${label}</button>`).join('')}</div><label class="pk-field"><span>数据包名称</span><input id="packageSearch" value="${e(state.packageQuery)}" placeholder="搜索数据包"></label><label class="pk-field"><span>所属分组</span><select id="packageGroup"><option value="all">全部</option>${['未分组',...state.groups].map(g=>`<option value="${e(g)}" ${state.packageGroup===g?'selected':''}>${e(g)}</option>`).join('')}</select></label>${btn('搜索','package-search','primary','','search')}${btn('重置','package-reset','','','refresh')}</div><div class="pk-batch-actions">${btn('批量删除','delete-packs','danger small',state.selectedPacks.size?'':'disabled','trash')}${btn('管理分组','new-group','small','','folder')}${btn('导出记录','package-records','small','','clock')}${btn('人工鉴图','inspect-package','small','','image')}${btn('AI 图片、标题检测','review-packages','small','','shield')}</div></section>`+
+      `<div class="pk-table-wrap"><table class="pk-table"><thead><tr><th><input id="selectAllPacks" type="checkbox" aria-label="全选数据包" ${packs.length&&packs.every(p=>state.selectedPacks.has(p.id))?'checked':''}></th><th>ID</th><th>数据包名称</th><th>所属分组</th><th>商品数</th><th>类型</th><th>创建时间</th><th>更新时间</th><th>备注</th><th>操作</th></tr></thead><tbody>${packs.map((p,i)=>{const items=state.products.filter(x=>x.packageId===p.id);return `<tr><td><input type="checkbox" data-pack-select="${e(p.id)}" aria-label="选择数据包 ${e(p.name)}" ${state.selectedPacks.has(p.id)?'checked':''}></td><td>${i+1}</td><td><button class="pk-name" data-action="package-open" data-id="${e(p.id)}" title="${e(p.name)}">${e(p.name)}</button></td><td><select aria-label="数据包分组 ${e(p.name)}" data-pack-group="${e(p.id)}">${['未分组',...state.groups].map(g=>`<option ${p.group===g?'selected':''}>${e(g)}</option>`).join('')}</select></td><td>${items.length}</td><td><span class="status-pill neutral">${e(p.type)}</span></td><td class="pk-time">${e(p.createdAt)}</td><td class="pk-time">${e(p.updatedAt)}</td><td><input class="pk-note" data-pack-note="${e(p.id)}" value="${e(p.note)}" aria-label="数据包备注"></td><td><div class="pk-row-actions"><button class="pk-open" data-action="package-open" data-id="${e(p.id)}">查看商品 ${icon('arrow')}</button><button data-action="package-low" data-id="${e(p.id)}">低价检测</button><button data-action="package-export" data-id="${e(p.id)}">导出数据包</button><button data-action="package-append" data-id="${e(p.id)}">追加数据包</button><button data-action="package-rename" data-id="${e(p.id)}">改名</button></div></td></tr>`}).join('')||'<tr><td colspan="10" class="pk-empty">暂无数据包</td></tr>'}</tbody></table></div><div class="pk-pagination"><span>共 ${packs.length} 条</span><select aria-label="每页条数"><option>20 条/页</option></select><button class="icon-button" disabled aria-label="上一页">${icon('left')}</button><span class="pk-page-number">1</span><button class="icon-button" disabled aria-label="下一页">${icon('chevron')}</button></div>`;
+  }
+  function openPackage(packId, initialId, initialTab='main') {
+    const products=state.products.filter(p=>p.packageId===packId);
+    const pack=state.packs.find(p=>p.id===packId);
+    window.PackageWorkbench.open({products:clone(products),initialId,initialTab,packageName:pack?.name||'数据包详情',src,media,
+      onSave(product){const validation=C.validateProduct(product);if(!validation.ok)return false;const next=clone(product),previous=state.products;next.packageId=packId;syncDerived(next);state.products=state.products.map(p=>p.id===next.id?next:p);changed(next.id);if(pack)pack.updatedAt=new Date().toLocaleString('zh-CN',{hour12:false});if(!save()){state.products=previous;return false;}return true;},
+      onDelete(id){state.products=state.products.filter(p=>p.id!==id);state.selected.delete(id);state.favorites=state.favorites.filter(x=>x!==id);save();},
+      onDeletePackage(){state.products=state.products.filter(p=>p.packageId!==packId);state.packs=state.packs.filter(p=>p.id!==packId);state.selectedPacks.delete(packId);state.selected.clear();save();render();},
+      onOpenAI(id,mode){state.studio.id=id;state.studio.mode=mode||'scene';state.studio.source=0;state.studio.result=null;state.studio.comparison=false;route('studio');},
+      onExport(ids){state.selected=new Set(ids);state.export.scope='selected';route('export');},
+      onReview(ids,filter='all'){state.reviewScope=ids;state.reviewFilter=filter==='images'?'image':filter;route('review');scan();},
+      onAppend(){state.pendingImportPackId=packId;importDialog();},onClose(){render();}
+    });
+  }
+  function productLibrary() {
     const products = activeProducts();
     return head('商品资产', btn('新建分组','new-group','','','plus') + btn('导入数据包','import','primary','','upload'), `${state.products.length} 件商品`) +
       `<div class="collection-strip">${state.groups.map((g,i) => `<button class="collection-tile ${state.group === g ? 'active' : ''}" data-action="group" data-value="${e(g)}"><span class="collection-icon tone-${i % 2}">${icon('folder')}</span><span class="collection-info"><strong>${e(g)}</strong><span>${state.products.filter(p=>p.group===g).length} 件商品</span></span>${icon('chevron')}</button>`).join('')}<button class="collection-tile collection-add" data-action="new-group" aria-label="新建分组">${icon('plus')}</button></div>` +
@@ -128,7 +150,7 @@
   }
   function review() {
     const risks = state.scanned ? getRisks() : [], riskProducts = new Set(risks.map(r=>r.productId)), task=state.tasks.find(t=>t.kind==='scan'&&t.status==='running');
-    const typeLabels = { all:'全部', 'price-mismatch':'价格', 'zero-stock':'库存', image:'图片', word:'标题' };
+    const typeLabels = { all:'全部', 'price-mismatch':'价格', 'low-price':'低价 SKU', 'zero-stock':'库存', image:'图片', word:'标题' };
     const shown = risks.filter(r=>state.reviewFilter==='all'||r.type===state.reviewFilter||(state.reviewFilter==='price-mismatch'&&r.type==='low-price'));
     return head('风险检查', btn('词库管理','word-list','','','list') + btn(task?'检查中…':'开始检查','scan','primary',task?'disabled':'','shield')) +
       `<div class="review-summary"><div class="review-stat"><span>商品总数</span><strong>${reviewProducts().length}<small>件</small></strong></div><div class="review-stat"><span>已检查</span><strong>${state.scanned?reviewProducts().length:0}<small>件</small></strong></div><div class="review-stat warning"><span>待处理</span><strong>${riskProducts.size}<small>件</small></strong></div><div class="review-stat"><span>规则通过</span><strong>${state.scanned?reviewProducts().length-riskProducts.size:0}<small>件</small></strong></div></div>${task?`<div class="scan-progress"><span>正在检查 ${Math.min(reviewProducts().length,Math.ceil(reviewProducts().length*task.progress/100))} / ${reviewProducts().length}</span><div class="progress-track"><div class="progress-fill" style="width:${task.progress}%"></div></div><span>${task.progress}%</span></div>`:''}<div class="review-layout"><aside class="review-filters"><h2>检查项目</h2>${[['title','标题词库'],['price','价格与低价 SKU'],['stock','SKU 库存'],['images','图片文字 · 演示']].map(([key,label])=>`<label class="check-row"><input type="checkbox" data-rule="${key}" ${state.rules[key]?'checked':''}>${label}</label>`).join('')}<div class="rule-divider"></div><h2>违规词库</h2><div class="word-chips">${state.rules.words.slice(0,7).map(w=>`<span>${e(w)}</span>`).join('')}</div></aside><section class="review-results"><div class="tabs">${Object.entries(typeLabels).map(([key,label])=>`<button class="tab ${state.reviewFilter===key?'active':''}" data-action="risk-filter" data-value="${key}">${label}${key==='all'?` <span class="tab-count">${risks.length}</span>`:''}</button>`).join('')}</div><div class="risk-list">${!state.scanned?`<div class="empty-state">${icon('shield')}<h2>待检查</h2>${btn('开始检查','scan','primary',task?'disabled':'')}</div>`:!shown.length?`<div class="empty-state">${icon('check')}<h2>无待处理项</h2></div>`:shown.map(r=>{const p=getProduct(r.productId);return `<article class="risk-item"><img class="risk-thumb" src="${src(p.main[0])}" alt="${e(p.shortTitle)}"><div class="risk-body"><div class="label-row"><strong>${e(r.title)}</strong><span class="status-pill ${r.type==='image'?'neutral':'warning'}">${r.type==='image'?'AI 演示':'待处理'}</span></div><button class="risk-product-link" data-action="detail" data-id="${p.id}">${e(p.shortTitle)}</button><p>${e(r.detail)}</p></div><div class="risk-actions">${r.fixable?btn(r.type==='word'?'移除词语':'同步价格','fix-risk','small',`data-id="${e(r.id)}"`):btn(r.type==='image'?'查看图片':'编辑 SKU',r.type==='image'?'risk-image':'detail','small',`data-id="${r.type==='image'?e(r.id):p.id}" data-tab="sku"`)}${ib('忽略此项','ignore-risk','close',`data-id="${e(r.id)}"`)}</div></article>`}).join('')}</div></section></div>`;
@@ -170,7 +192,7 @@
     showModal('商品详情',`<div class="detail-layout"><div class="detail-preview"><button class="detail-main-image" data-action="zoom" data-src="${e(src(im))}"><img src="${src(im)}" alt="${e(p.shortTitle)}"></button><div class="image-strip">${gallery.slice(0,8).map((image,i)=>`<button class="source-thumb ${modal.imageIndex===i?'active':''}" data-action="detail-image" data-index="${i}" aria-label="预览图片 ${i+1}"><img src="${src(image)}" alt="图片 ${i+1}"></button>`).join('')}</div></div><div class="detail-editor">${tabs}${content}</div></div>`, `<span class="detail-save-status" id="detailError"></span>${btn('取消','close-modal')}${btn('保存修改','save-detail','primary','','check')}`,'detail-dialog');
   }
   function openZoom(value) { lightbox.innerHTML=`<div class="lightbox-toolbar">${ib('关闭图片','close-lightbox','close')}</div><img class="lightbox-image" src="${e(src(value))}" alt="商品大图">`; lightbox.showModal(); }
-  function syncDerived(p) { if(p.skus.length) {p.price=Math.min(...p.skus.map(s=>s.price));p.priceMax=Math.max(...p.skus.map(s=>s.price));} p.stock=p.skus.reduce((n,s)=>n+s.stock,0); p.totalImages=p.main.length+p.skuImages.length+p.details.length; }
+  function syncDerived(p) { if(p.skus.length) {p.price=Math.min(...p.skus.map(s=>s.price));p.priceMax=Math.max(...p.skus.map(s=>s.price));} p.stock=p.skus.reduce((n,s)=>n+s.stock,0); p.totalImages=['main','skuImages','details','whiteImages','qualifications'].reduce((n,key)=>n+(p[key]?.length||0),0); }
   function changed(id) { state.checked=state.checked.filter(x=>x!==id);state.ignored=[]; }
   function runTask(kind,name,total,complete,metadata={}) {
     const task={id:'t'+Date.now()+Math.random().toString(16).slice(2,6),kind,name,total,status:'running',progress:0,time:new Date().toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}),...metadata};
@@ -226,12 +248,28 @@
     if(!p.main.length)p.main=[placeholder];syncDerived(p);return p;
   }
   document.addEventListener('click',async ev=>{
-    const nav=ev.target.closest('[data-nav]');if(nav){if(nav.dataset.nav==='review')state.reviewScope=null;route(nav.dataset.nav);return;}
-    const grp=ev.target.closest('[data-group]');if(grp){state.group=grp.dataset.group;state.filter='all';route('library');return;}
+    const nav=ev.target.closest('[data-nav]');if(nav){if(nav.dataset.nav==='review')state.reviewScope=null;if(nav.dataset.nav==='library')state.libraryMode='packages';route(nav.dataset.nav);return;}
+    const grp=ev.target.closest('[data-group]');if(grp){state.group=grp.dataset.group;state.filter='all';state.libraryMode='products';route('library');return;}
     const el=ev.target.closest('[data-action]');if(!el)return;
     const {action,id,value,index}=el.dataset;
     const p=id?getProduct(id):null;
     switch(action){
+      case 'package-home':state.libraryMode='packages';state.query='';$('#globalSearch').value='';render();break;
+      case 'product-view':state.libraryMode='products';render();break;
+      case 'package-type':state.packageType=value;render();break;
+      case 'package-search':state.packageQuery=$('#packageSearch').value.trim();render();break;
+      case 'package-reset':state.packageQuery='';state.packageGroup='all';state.packageType='all';render();break;
+      case 'package-open':openPackage(id);break;
+      case 'package-low':state.reviewScope=state.products.filter(p=>p.packageId===id).map(p=>p.id);state.reviewFilter='low-price';route('review');scan();break;
+      case 'package-export':state.selected=new Set(state.products.filter(p=>p.packageId===id).map(p=>p.id));state.export.scope='selected';route('export');break;
+      case 'package-append':state.pendingImportPackId=id;importDialog();break;
+      case 'package-records':route('tasks');break;
+      case 'inspect-package':{const packId=[...state.selectedPacks][0]||state.packs[0]?.id;if(packId)openPackage(packId);else toast('暂无数据包');break;}
+      case 'review-packages':state.reviewScope=state.selectedPacks.size?state.products.filter(p=>state.selectedPacks.has(p.packageId)).map(p=>p.id):null;state.reviewFilter='all';route('review');scan();break;
+      case 'package-rename':{const pack=state.packs.find(p=>p.id===id);modal={type:'rename-pack',id};showModal('修改名称','<div class="field"><label class="field-label" for="renamePack">数据包名称</label><input id="renamePack" value="'+e(pack.name)+'"></div>',btn('取消','close-modal')+btn('保存','confirm-pack-name','primary'));break;}
+      case 'confirm-pack-name':{const name=$('#renamePack').value.trim();if(!name)return;state.packs.find(p=>p.id===modal.id).name=name;save();dialog.close();render();break;}
+      case 'delete-packs':modal={type:'delete-packs'};showModal('删除数据包','<div class="reset-count">'+state.selectedPacks.size+'<span>个数据包</span></div>',btn('取消','close-modal')+btn('删除','confirm-delete-packs','danger'));break;
+      case 'confirm-delete-packs':{const previous={packs:clone(state.packs),products:clone(state.products)};state.products=state.products.filter(p=>!state.selectedPacks.has(p.packageId));state.packs=state.packs.filter(p=>!state.selectedPacks.has(p.id));state.selectedPacks.clear();save();dialog.close();render();toast('数据包已删除',()=>{state.products=previous.products;state.packs=previous.packs;save();render();});break;}
       case 'toggle-menu': document.body.classList.toggle('sidebar-open');$('#menuMobile').setAttribute('aria-expanded',String(document.body.classList.contains('sidebar-open')));break;
       case 'close-menu': document.body.classList.remove('sidebar-open','menu-open');break;
       case 'group':state.group=value;state.filter='all';render();break;
@@ -242,7 +280,7 @@
       case 'select':state.selected.has(id)?state.selected.delete(id):state.selected.add(id);render();break;
       case 'clear-selected':state.selected.clear();render();break;
       case 'favorite':state.favorites.includes(id)?state.favorites=state.favorites.filter(v=>v!==id):state.favorites.push(id);save();render();break;
-      case 'detail':openDetail(id,el.dataset.tab||'info');break;
+      case 'detail':if(p)openPackage(p.packageId,p.id,el.dataset.tab==='sku'?'sku':'main');break;
       case 'detail-tab':modal.tab=value;renderDetail();break;
       case 'detail-image':modal.imageIndex=Number(index);renderDetail();break;
       case 'image-group':modal.imageGroup=value;modal.imageIndex=0;renderDetail();break;
@@ -269,7 +307,7 @@
       case 'candidate':state.studio.selected=Number(index);render();break;
       case 'compare':state.studio.comparison=value==='true';render();break;
       case 'generate':generate();break;
-      case 'adopt':{const s=state.studio,product=getProduct(s.id);if(!s.result)return;const before=clone(product);if(s.mode==='video')product.video=getProduct(s.result.productId).video;else{const chosen=s.result.images[s.selected];product.main=[chosen,...product.main.filter(i=>i!==chosen)];}changed(product.id);syncDerived(product);save();toast('结果已采用',()=>{state.products=state.products.map(x=>x.id===before.id?before:x);save();render();});break;}
+      case 'adopt':{const s=state.studio,product=getProduct(s.id);if(!s.result)return;const before=clone(product);if(s.mode==='video')product.video=getProduct(s.result.productId).video;else{const chosen=s.result.images[s.selected];if(s.mode==='white')product.whiteImages=[chosen,...(product.whiteImages||[]).filter(i=>i!==chosen)];product.main=[chosen,...product.main.filter(i=>i!==chosen)];}changed(product.id);syncDerived(product);save();toast('结果已采用',()=>{state.products=state.products.map(x=>x.id===before.id?before:x);save();render();});break;}
       case 'studio-history':route('tasks');break;
       case 'go-studio':route('studio');break;
       case 'scan':scan();break;
@@ -285,15 +323,15 @@
       case 'clear-tasks':state.tasks=state.tasks.filter(t=>t.status==='running');save();render();toast('记录已清理');break;
       case 'task-download':{const d=downloads.get(id);if(d)download(d.blob,d.filename);else{const t=state.tasks.find(x=>x.id===id);if(t?.exportConfig){state.export=t.exportConfig;state.selected=new Set(t.productIds);state.export.scope='selected';route('export');await exportNow();}}break;}
       case 'task-result':{const t=state.tasks.find(x=>x.id===id),r=state.generated.find(x=>x.id===t?.resultId);if(r){state.studio.id=r.productId;state.studio.mode=r.mode;state.studio.result=r;state.studio.selected=0;route('studio');}break;}
-      case 'import':importDialog();break;
-      case 'confirm-import':{const files=$('#importFiles').files;if(!files.length){$('#importStatus').textContent='请选择文件';return;}let imported=[],errors=0;for(const file of files){try{const raw=JSON.parse(await file.text());const arr=Array.isArray(raw)?raw:Array.isArray(raw.products)?raw.products:[raw];if(arr.length>500)throw Error('数量过多');for(const [i,d]of arr.entries()){const p=normalizeImported(d,i);if(!C.validateProduct(p).ok)throw Error('格式错误');imported.push(p);}}catch{errors++;}}if(!imported.length){$('#importStatus').textContent='未识别到有效商品';return;}const pack=$('#importName').value.trim()||'导入商品';if(!state.groups.includes(pack))state.groups.push(pack);let added=0;imported.forEach(p=>{if(!getProduct(p.id)){p.group=pack;state.products.push(p);added++;}});save();dialog.close();render();toast(`导入 ${added} 件 · 跳过 ${imported.length-added} 件${errors?' · 失败 '+errors+' 个文件':''}`);break;}
+      case 'import':state.pendingImportPackId=null;importDialog();break;
+      case 'confirm-import':{const files=$('#importFiles').files;if(!files.length){$('#importStatus').textContent='请选择文件';return;}let imported=[],errors=0;for(const file of files){try{const raw=JSON.parse(await file.text());const arr=Array.isArray(raw)?raw:Array.isArray(raw.products)?raw.products:[raw];if(arr.length>500)throw Error('数量过多');for(const [i,d]of arr.entries()){const p=normalizeImported(d,i);if(!C.validateProduct(p).ok)throw Error('格式错误');imported.push(p);}}catch{errors++;}}if(!imported.length){$('#importStatus').textContent='未识别到有效商品';return;}const packName=$('#importName').value.trim()||'导入商品',packId=state.pendingImportPackId||'pack-'+Date.now();let added=0;imported.forEach(p=>{if(!getProduct(p.id)){p.packageId=packId;if(!state.groups.includes(p.group))state.groups.push(p.group);state.products.push(p);added++;}});if(added&&!state.packs.some(p=>p.id===packId)){const time=new Date().toLocaleString('zh-CN',{hour12:false});state.packs.push({id:packId,name:packName,group:'未分组',type:'数据包',createdAt:time,updatedAt:time,note:''});}state.pendingImportPackId=null;state.libraryMode='packages';save();dialog.close();render();toast(`导入 ${added} 件 · 跳过 ${imported.length-added} 件${errors?' · 失败 '+errors+' 个文件':''}`);break;}
       case 'reset':modal={type:'reset'};showModal('重置演示',`<div class="reset-count">${state.products.length}<span>件商品</span></div>`,btn('取消','close-modal')+btn('恢复初始数据','confirm-reset','primary'));break;
-      case 'confirm-reset':timers.forEach(t=>clearInterval(t));timers.clear();try{localStorage.removeItem(STORE);}catch{}location.hash='library';location.reload();break;
+      case 'confirm-reset':timers.forEach(t=>clearInterval(t));timers.clear();try{localStorage.removeItem(STORE);localStorage.removeItem('tuying-workbench-blacklist:'+location.pathname);}catch{}location.hash='library';location.reload();break;
     }
   });
   document.addEventListener('input',ev=>{
     const el=ev.target;
-    if(el.id==='globalSearch'){state.query=el.value;if(state.page!=='library')state.page='library';render();}
+    if(el.id==='globalSearch'){state.libraryMode='products';state.query=el.value;if(state.page!=='library')state.page='library';render();}
     if(modal?.type==='detail'){
       if(el.id==='editTitle')modal.draft.title=el.value;
       if(el.id==='editShortTitle')modal.draft.shortTitle=el.value;
@@ -303,6 +341,11 @@
   });
   document.addEventListener('change',ev=>{
     const el=ev.target;
+    if(el.id==='packageGroup'){state.packageGroup=el.value;render();}
+    if(el.id==='selectAllPacks'){state.packs.forEach(p=>el.checked?state.selectedPacks.add(p.id):state.selectedPacks.delete(p.id));render();}
+    if(el.dataset.packSelect){el.checked?state.selectedPacks.add(el.dataset.packSelect):state.selectedPacks.delete(el.dataset.packSelect);render();}
+    if(el.dataset.packGroup){const p=state.packs.find(p=>p.id===el.dataset.packGroup);if(p){p.group=el.value;save();}}
+    if(el.dataset.packNote){const p=state.packs.find(p=>p.id===el.dataset.packNote);if(p){p.note=el.value;save();}}
     if(el.id==='selectAll'){activeProducts().forEach(p=>el.checked?state.selected.add(p.id):state.selected.delete(p.id));render();}
     if(el.id==='sort'){state.sort=el.value;render();}
     if(el.id==='studioProduct'){state.studio.id=el.value;state.studio.source=0;state.studio.result=null;state.studio.comparison=false;render();}
